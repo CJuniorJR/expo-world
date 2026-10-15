@@ -1,7 +1,6 @@
 """Reproducible offline Curitiba package. Inputs: IBGE PR bairros CD2022 + bounded Overpass query.
 Install shapely and pyshp under .tools/geodata-libs. No GPS records or credentials are used.
 """
-import gzip
 import hashlib
 import json
 import math
@@ -99,12 +98,14 @@ assert len(roads) > 1000, 'Road package is unexpectedly incomplete'
 digest = hashlib.sha256((RAW / 'roads.json').read_bytes() + (RAW / 'bairros.zip').read_bytes() + Path(__file__).read_bytes()).hexdigest()[:12]
 metadata = {'version': 'curitiba-' + digest, 'retrieved': '2026-10-15', 'boundaries': 'IBGE Censo 2022 (31/07/2022)', 'roadsTimestamp': raw_roads.get('osm3s', {}).get('timestamp_osm_base', 'unknown'), 'license': 'ODbL-1.0', 'attribution': '© OpenStreetMap contributors; limites: IBGE, Censo 2022', 'binMeters': 10}
 package = {'metadata': metadata, 'neighborhoods': [{'id': f['properties']['id'], 'name': f['properties']['name']} for f in features], 'roads': roads}
-with gzip.open(OUT / 'curitiba-network.json.gz', 'wt', encoding='utf-8', compresslevel=9) as stream:
+# AAPT expands .gz assets and removes the suffix; ship JSON, compressed by the APK ZIP.
+with (OUT / 'curitiba-network.json').open('w', encoding='utf-8') as stream:
     json.dump(package, stream, ensure_ascii=False, separators=(',', ':'))
 (OUT / 'curitiba-neighborhoods.geojson').write_text(json.dumps({'type': 'FeatureCollection', 'features': features}, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
-totals = {f['properties']['id']: {'name': f['properties']['name'], 'carKm': 0.0, 'walkKm': 0.0, 'bikeKm': 0.0} for f in features}
+totals = {f['properties']['id']: {'name': f['properties']['name'], 'carKm': 0.0, 'walkKm': 0.0, 'bikeKm': 0.0, 'sharedKm': 0.0} for f in features}
 for _, bairro, allowed, coords in roads:
     km = LineString(coords).length / 1000
+    totals[bairro]['sharedKm'] += km
     for bit, key in [(1, 'carKm'), (2, 'walkKm'), (4, 'bikeKm')]:
         if allowed & bit: totals[bairro][key] += km
 report = {'metadata': metadata, 'roadParts': len(roads), 'neighborhoods': [{**{'id': key}, **{k: round(v, 3) if isinstance(v, float) else v for k, v in row.items()}} for key, row in totals.items()]}

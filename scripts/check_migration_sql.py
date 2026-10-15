@@ -92,10 +92,12 @@ with db:
     for mode, activity in [('real','walk'), ('real','walk'), ('real','bike'), ('simulation','walk')]:
         db.execute("INSERT OR IGNORE INTO street_visits VALUES (?, ?, 'v1', 'street', 0, 'bairro', 10.0)", (mode, activity))
 assert db.execute("SELECT COUNT(*) FROM street_visits").fetchone()[0] == 3
-assert db.execute(query("SELECT neighborhoodId, SUM(meters)"), {'mode':'real','activity':'walk','dataset':'v1'}).fetchone() == ('bairro', 10.0)
-assert db.execute(query("SELECT neighborhoodId, SUM(meters)"), {'mode':'real','activity':'walk','dataset':'v2'}).fetchall() == []
+with db:
+    db.execute("INSERT INTO street_visits VALUES ('real', 'car', 'v1', 'street', 1, 'bairro', 10.0)")
+assert db.execute(query("SELECT neighborhoodId, SUM(meters)"), {'mode':'real','dataset':'v1'}).fetchone() == ('bairro', 20.0)
+assert db.execute(query("SELECT neighborhoodId, SUM(meters)"), {'mode':'real','dataset':'v2'}).fetchall() == []
 with db:
     db.execute(query("DELETE FROM street_visits WHERE mode = 'simulation'"))
-assert db.execute("SELECT COUNT(*) FROM street_visits").fetchone()[0] == 2
+assert db.execute("SELECT COUNT(*) FROM street_visits").fetchone()[0] == 3
 db.close()
-print("PASS: migrations 1->2->3->4->5 match Room schema; old cells/trips/titles preserved, activity defaults to car, street visits deduplicate and isolate modes/activities/versions; retention, reopen and rollback verified (host SQLite).")
+print("PASS: migrations 1->2->3->4->5 match Room schema; old cells/trips/titles preserved, activity defaults to car, street visits deduplicate and share activities without double counting and isolate real/simulation/versions; retention, reopen and rollback verified (host SQLite).")

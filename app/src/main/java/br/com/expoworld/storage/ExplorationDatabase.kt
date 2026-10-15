@@ -54,8 +54,8 @@ private fun TraceSample.toRow(mode: String) = RouteSampleRow(mode, sequence, lat
 interface ExplorationDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertStreetVisits(visits: List<StreetVisit>)
-    @Query("SELECT neighborhoodId, SUM(meters) AS meters FROM street_visits WHERE mode = :mode AND activity = :activity AND dataset = :dataset GROUP BY neighborhoodId")
-    fun streetTotals(mode: String, activity: String, dataset: String): Flow<List<NeighborhoodMeters>>
+    @Query("SELECT neighborhoodId, SUM(meters) AS meters FROM (SELECT neighborhoodId, streetId, bin, MAX(meters) AS meters FROM street_visits WHERE mode = :mode AND dataset = :dataset GROUP BY neighborhoodId, streetId, bin) GROUP BY neighborhoodId")
+    fun streetTotals(mode: String, dataset: String): Flow<List<NeighborhoodMeters>>
     @Query("DELETE FROM street_visits WHERE mode = 'simulation'")
     suspend fun clearSimulatedVisits()
     @Query("SELECT * FROM saved_routes ORDER BY startedAtMillis DESC, id")

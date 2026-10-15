@@ -136,14 +136,13 @@ class MainActivity : ComponentActivity() {
         val progressFlow = remember(viewMode) { app.repository.progress(viewMode) }
         val progressValue by progressFlow.collectAsStateWithLifecycle(ExplorationProgress(mode = viewMode))
         val progress = progressValue.takeIf { it.mode == viewMode } ?: ExplorationProgress(mode = viewMode)
-        val cityFlow = remember(viewMode, state.activity) { app.city.progress(viewMode, state.activity) }
-        val cityValue by cityFlow.collectAsStateWithLifecycle(CityProgress(activity = state.activity))
+        val cityFlow = remember(viewMode) { app.city.progress(viewMode) }
+        val cityValue by cityFlow.collectAsStateWithLifecycle(CityProgress())
         var currentNeighborhood by remember { mutableStateOf<String?>(null) }
         LaunchedEffect(state.position, viewMode) {
             currentNeighborhood = app.city.neighborhoodAt(state.position.takeIf { state.simulated == (viewMode == "simulation") })
         }
-        val cityProgress = (cityValue.takeIf { it.activity == state.activity } ?: CityProgress(activity = state.activity))
-            .copy(currentNeighborhoodId = currentNeighborhood)
+        val cityProgress = cityValue.copy(currentNeighborhoodId = currentNeighborhood)
         val online by connectivity.online.collectAsStateWithLifecycle()
         val isFollowing by following
         val traceFlow = remember(viewMode) { app.repository.route(viewMode) }

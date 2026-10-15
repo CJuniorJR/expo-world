@@ -35,7 +35,7 @@ class CityExplorationTest {
         assertEquals(first, reverse)
         val unique = (first + reverse).sumOf { it.meters }
         assertEquals(40.0, unique, .001)
-        assertEquals(.4, n.progress(ActivityKind.CAR, mapOf("1" to unique)).neighborhoods.single().fraction, .001)
+        assertEquals(.4, n.progress(mapOf("1" to unique)).neighborhoods.single().fraction, .001)
     }
     @Test fun rejectsBadAccuracyGapsStationaryDriftAndLongBridges() {
         val n = network(street())
@@ -56,15 +56,23 @@ class CityExplorationTest {
         assertTrue(n.match(fix(0.0), fix(20.0, time = 5.0), ActivityKind.CAR).isEmpty())
         assertFalse(n.match(fix(0.0), fix(20.0, time = 5.0), ActivityKind.WALK).isEmpty())
         assertTrue(n.match(fix(0.0), fix(40.0, time = 1.0), ActivityKind.WALK).isEmpty())
-        assertEquals(0.0, n.progress(ActivityKind.BIKE, emptyMap()).totalMeters, .0)
-        assertEquals(100.0, n.progress(ActivityKind.WALK, emptyMap()).totalMeters, .0)
+        assertEquals(100.0, n.progress(emptyMap()).totalMeters, .0)
+    }
+    @Test fun sharedProgressUsesOneDenominatorAcrossAllActivityNetworks() {
+        val n = network(street("car", mask = 1), street("walk", y = 20.0, mask = 2),
+            street("bike", y = 40.0, mask = 4), street("shared", y = 60.0, mask = 7))
+        val progress = n.progress(mapOf("1" to 100.0))
+        assertEquals(400.0, progress.totalMeters, .001)
+        assertEquals(.25, progress.neighborhoods.single().fraction, .001)
+        assertFalse(n.match(fix(0.0, 20.0), fix(10.0, 20.0, 5.0), ActivityKind.WALK).isEmpty())
+        assertTrue(n.match(fix(0.0, 20.0), fix(10.0, 20.0, 5.0), ActivityKind.CAR).isEmpty())
     }
     @Test fun boundaryPiecesCreditTheirOwnNeighborhoodWithoutExceedingTotals() {
         val n = network(street("left", end = 50.0), street("right", bairro = "2", start = 50.0))
         val credits = n.match(fix(30.0), fix(70.0, time = 5.0), ActivityKind.CAR)
         assertEquals(setOf("1", "2"), credits.map { it.neighborhoodId }.toSet())
         assertTrue(credits.sumOf { it.meters } <= 40.01)
-        assertEquals(1.0, n.progress(ActivityKind.CAR, mapOf("1" to 999.0)).neighborhoods.single().fraction, .0)
+        assertEquals(1.0, n.progress(mapOf("1" to 999.0)).neighborhoods.single().fraction, .0)
     }
     @Test fun walkingStopThresholdAndPaletteAreAppropriateToWalking() {
         assertNotEquals("#000000", TracePresentation.color(2.0, ActivityKind.WALK.brightKmh, ActivityKind.WALK.stopKmh))

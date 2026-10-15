@@ -208,8 +208,11 @@ fun ExplorationScreen(
                 }
             }
             Text(if (state.active) "${state.activity.label} em andamento. Encerre para trocar de atividade."
-                else "Escolha a atividade antes de iniciar. O progresso de ruas é separado para cada atividade.", color = Muted,
+                else "Escolha a atividade antes de iniciar. O mapa e o progresso são compartilhados entre carro, caminhada e bicicleta.", color = Muted,
                 style = MaterialTheme.typography.bodySmall)
+            NeighborhoodPanel(cityProgress, simulatedView, state.position != null && state.simulated == simulatedView) { id ->
+                onNeighborhoodFocus(id); menuOpen = false
+            }
             Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFF1C2C33), contentColor = Color.White) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(statusLabel, color = statusColor, style = MaterialTheme.typography.labelLarge)
@@ -226,9 +229,6 @@ fun ExplorationScreen(
             }
             Text("Suas descobertas ficam salvas neste aparelho e se acumulam entre viagens.", color = Muted,
                 style = MaterialTheme.typography.bodySmall)
-            NeighborhoodPanel(cityProgress, simulatedView, state.position != null && state.simulated == simulatedView) { id ->
-                onNeighborhoodFocus(id); menuOpen = false
-            }
             Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFF183A36), contentColor = Color.White) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("✦  ${progress.title}", color = Mint, style = MaterialTheme.typography.titleMedium)
@@ -366,11 +366,14 @@ private fun NeighborhoodPanel(progress: CityProgress, simulated: Boolean, hasPos
     Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFF183A36), contentColor = Color.White) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Curitiba • ruas exploradas", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text("${progress.activity.label}${if (simulated) " • SIMULADO" else " • real"}", color = Mint)
+            Text("Carro + caminhada + bicicleta • ${if (simulated) "SIMULADO" else "real"}", color = Mint)
             when {
                 progress.error != null -> Text(progress.error.orEmpty(), color = Muted)
                 progress.neighborhoods.isEmpty() -> Text("Carregando base offline de Curitiba…", color = Muted)
                 else -> {
+                    val fraction = if (progress.totalMeters > 0) progress.visitedMeters / progress.totalMeters else 0.0
+                    Text(String.format(Locale.forLanguageTag("pt-BR"), "%.1f%% de Curitiba", fraction * 100),
+                        style = MaterialTheme.typography.headlineSmall, color = Mint)
                     Text("${distanceLabel(progress.visitedMeters)} de ${distanceLabel(progress.totalMeters)} • estimativa", color = Mint)
                     val current = progress.neighborhoods.firstOrNull { it.id == progress.currentNeighborhoodId }
                     Text(current?.let { "Você está em ${it.name}" } ?: if (hasPosition) "Sua posição está fora dos bairros de Curitiba desta base."
@@ -382,9 +385,10 @@ private fun NeighborhoodPanel(progress: CityProgress, simulated: Boolean, hasPos
                     }
                     if (expanded) OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Buscar bairro") },
                         singleLine = true, modifier = Modifier.fillMaxWidth())
+                    val summary = listOfNotNull(current) + progress.neighborhoods.filter { it.visitedMeters > 0 && it.id != current?.id }
+                        .sortedByDescending { it.fraction }.take(4)
                     val rows = if (expanded) progress.neighborhoods.filter { it.name.contains(query, ignoreCase = true) }
-                        else listOfNotNull(current) + progress.neighborhoods.filter { it.visitedMeters > 0 && it.id != current?.id }
-                            .sortedByDescending { it.fraction }.take(4)
+                        else summary.ifEmpty { progress.neighborhoods.take(3) }
                     rows.forEach { row ->
                         Surface(onClick = { onFocus(row.id) }, color = Color(0xFF1C2C33), contentColor = Color.White,
                             shape = RoundedCornerShape(12.dp)) {

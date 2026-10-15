@@ -8,7 +8,6 @@ import kotlinx.coroutines.flow.*
 import org.json.JSONArray
 import org.json.JSONObject
 import org.locationtech.jts.geom.*
-import java.util.zip.GZIPInputStream
 
 class CuritibaRepository(private val dao: ExplorationDao, assets: AssetManager) {
     private val loaderScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -29,14 +28,15 @@ class CuritibaRepository(private val dao: ExplorationDao, assets: AssetManager) 
         catch (e: CancellationException) { throw e }
         catch (_: Exception) { "" to emptySet() } // A damaged catalog must not stop GPS/fog recording.
     }
-    fun progress(mode: String, activity: ActivityKind): Flow<CityProgress> = flow {
+    fun progress(mode: String): Flow<CityProgress> = flow {
         val network = catalog.await()
-        emitAll(dao.streetTotals(mode, activity.key, network.version).map { rows ->
-            network.progress(activity, rows.associate { it.neighborhoodId to it.meters })
+        emitAll(dao.streetTotals(mode, network.version).map { rows ->
+            network.progress(rows.associate { it.neighborhoodId to it.meters })
         })
     }.catch { e ->
         if (e is CancellationException) throw e
-        emit(CityProgress(activity = activity, error = "Base de Curitiba indisponível. A exploração e os trajetos continuam sendo registrados."))
+        android.util.Log.e("CuritibaRepository", "Falha ao carregar catálogo offline", e)
+        emit(CityProgress(error = "Base de Curitiba indisponível. A exploração e os trajetos continuam sendo registrados."))
     }.flowOn(Dispatchers.Default)
 
     private fun load(assets: AssetManager): CityNetwork {
@@ -59,7 +59,8 @@ class CuritibaRepository(private val dao: ExplorationDao, assets: AssetManager) 
         var version = ""
         var timestamp = ""
         // Stream the large road array: don't keep a second full JSON object graph in memory.
-        JsonReader(GZIPInputStream(assets.open("curitiba-network.json.gz")).reader(Charsets.UTF_8)).use { reader ->
+        // AAPT expands .gz assets and strips their suffix. Ship plain JSON and let the APK compress it.
+        JsonReader(assets.open("curitiba-network.json").bufferedReader(Charsets.UTF_8)).use { reader ->
             reader.beginObject()
             while (reader.hasNext()) when (reader.nextName()) {
                 "metadata" -> {

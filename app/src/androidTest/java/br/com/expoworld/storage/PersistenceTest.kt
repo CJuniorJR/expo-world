@@ -18,10 +18,10 @@ class PersistenceTest {
         val db = Room.inMemoryDatabaseBuilder(context, ExplorationDatabase::class.java).build()
         try {
             val city = CuritibaRepository(db.cells(), context.assets)
-            val progress = city.progress("real", ActivityKind.CAR).first()
+            val progress = city.progress("real").first()
             assertNull(progress.error)
             assertEquals(75, progress.neighborhoods.size)
-            assertEquals(5_831_264.0, progress.totalMeters, 1.0)
+            assertEquals(6331756.502216, progress.totalMeters, 1.0)
             var previous: Fix? = null
             val credits = mutableSetOf<StreetCredit>()
             for (i in 0..120) {
@@ -46,12 +46,13 @@ class PersistenceTest {
             val saved = repo.savedRoutes().first().single()
             assertEquals("walk", saved.activity)
             assertEquals(ActivityKind.WALK, repo.route(saved.id).first()!!.activity)
-            dao.insertStreetVisits(listOf(visit.copy(activity = "bike"), visit.copy(mode = "simulation")))
+            dao.insertStreetVisits(listOf(visit.copy(activity = "bike"), visit.copy(activity = "car", bin = 1), visit.copy(mode = "simulation")))
+            assertEquals(20.0, dao.streetTotals("real", "v1").first().single().meters, .0)
+            assertEquals(10.0, dao.streetTotals("simulation", "v1").first().single().meters, .0)
             repo.clearSimulation()
-            assertEquals(10.0, dao.streetTotals("real", "walk", "v1").first().single().meters, .0)
-            assertEquals(10.0, dao.streetTotals("real", "bike", "v1").first().single().meters, .0)
-            assertTrue(dao.streetTotals("simulation", "walk", "v1").first().isEmpty())
-            assertTrue(dao.streetTotals("real", "walk", "v2").first().isEmpty())
+            assertEquals(20.0, dao.streetTotals("real", "v1").first().single().meters, .0)
+            assertTrue(dao.streetTotals("simulation", "v1").first().isEmpty())
+            assertTrue(dao.streetTotals("real", "v2").first().isEmpty())
         } finally { db.close() }
     }
     @Test fun titledRealRouteSurvivesReplacementSimulationResetAndReopen() = runBlocking {

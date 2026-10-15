@@ -1,3 +1,19 @@
+# Validação — 15/10/2026 — versão 0.3.1 — catálogo corrigido e mapa compartilhado
+
+- Causa da indisponibilidade confirmada no APK 0.3.0: o AAPT transformou o asset de entrada `curitiba-network.json.gz` em `assets/curitiba-network.json`, descompactado. O carregador ainda solicitava o nome `.gz`. O pacote agora usa JSON e o carregador abre esse nome por streaming com buffer; o ZIP do APK fornece a compressão.
+- `scripts/check_apk_assets.py` aprovado sobre o APK final: nomes solicitados pelo carregador, bytes dos dois assets, 75 bairros, 43.655 partes de ruas e versão do catálogo conferidos dentro do ZIP.
+- Mapa, névoa e cobertura únicos entre carro, caminhada e bicicleta. A consulta reúne créditos antigos/novos e deduplica por rua/parte antes de somar. Real/simulado e versões da base continuam separados. O denominador é a união das vias, **6.331,757 km estimados**. Mesmos IDs e geometrias, base `curitiba-167e3e15fb46`; nenhum reset ou migração de banco.
+- Painel movido para abaixo do seletor de atividade; mostra percentual geral e prévia de bairros mesmo sem GPS. Cada linha mantém percentual, barra e quilômetros.
+- **45 testes JVM aprovados**, zero falhas/erros. Teste adicional verifica o denominador compartilhado sem multiplicar vias permitidas a várias atividades; reconhecimento ainda respeita cada modalidade.
+- `python scripts/check_curitiba_data.py` e `python scripts/check_migration_sql.py` aprovados. O teste SQLite usa a consulta real do DAO: mesmo trecho em caminhada/bike conta 10 m, segundo trecho em carro eleva para 20 m; simulação e versão diferente não entram. Migrações 1→5, títulos, células, retenção e rollback continuam verificados.
+- `:app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest`: **BUILD SUCCESSFUL**. Lint: zero erros e 15 avisos. Sete testes instrumentados compilados; não executados porque `adb devices` não mostra aparelho. Não houve validação visual nem teste de GPS real nesta correção.
+
+APK: `dist/expo-world-0.3.1-debug.apk`, versionCode 7, 64.562.030 bytes. SHA-256: `0B97C06168258C5B257585E4A383639BA15AD8A228980D8C930B198C02EBB2CC`.
+
+Branch: `codex/curitiba-neighborhood-progress`. Configuração MapTiler local existente usada no APK, sem credenciais nos arquivos versionados.
+
+---
+
 # Validação — 15/10/2026 — versão 0.3.0 — Curitiba, caminhada e bicicleta
 
 ## Resultado atual

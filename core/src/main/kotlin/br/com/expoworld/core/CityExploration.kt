@@ -46,7 +46,7 @@ class CoverageWindow {
 data class NeighborhoodProgress(val id: String, val name: String, val totalMeters: Double, val visitedMeters: Double) {
     val fraction get() = if (totalMeters > 0) (visitedMeters / totalMeters).coerceIn(0.0, 1.0) else 0.0
 }
-data class CityProgress(val version: String = "", val sourceDate: String = "", val activity: ActivityKind = ActivityKind.CAR,
+data class CityProgress(val version: String = "", val sourceDate: String = "",
     val neighborhoods: List<NeighborhoodProgress> = emptyList(), val currentNeighborhoodId: String? = null, val error: String? = null) {
     val totalMeters get() = neighborhoods.sumOf { it.totalMeters }
     val visitedMeters get() = neighborhoods.sumOf { it.visitedMeters }
@@ -60,10 +60,11 @@ class CityNetwork(val version: String, val sourceDate: String, val neighborhoods
         val point = geometryFactory.createPoint(CuritibaProjection.point(fix.latitude, fix.longitude))
         return neighborhoods.firstOrNull { it.boundary.covers(point) }?.id
     }
-    fun progress(activity: ActivityKind, visited: Map<String, Double>, fix: Fix? = null): CityProgress {
-        val totals = streets.asSequence().filter { it.modes and activity.mask != 0 }.groupingBy { it.neighborhoodId }
+    fun progress(visited: Map<String, Double>, fix: Fix? = null): CityProgress {
+        // One shared map: each eligible street is in the denominator once, across all activities.
+        val totals = streets.asSequence().groupingBy { it.neighborhoodId }
             .fold(0.0) { value, street -> value + street.length }
-        return CityProgress(version, sourceDate, activity, neighborhoods.map { neighborhood ->
+        return CityProgress(version, sourceDate, neighborhoods.map { neighborhood ->
             val total = totals[neighborhood.id] ?: 0.0
             NeighborhoodProgress(neighborhood.id, neighborhood.name, total, (visited[neighborhood.id] ?: 0.0).coerceIn(0.0, total))
         }.sortedBy { it.name }, neighborhoodAt(fix))
