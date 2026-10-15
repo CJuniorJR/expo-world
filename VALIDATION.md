@@ -1,4 +1,38 @@
-# Validação — 15/10/2026 — simulação nas ruas e trajetos salvos
+# Validação — 15/10/2026 — versão 0.3.0 — Curitiba, caminhada e bicicleta
+
+## Resultado atual
+
+- **44 testes JVM aprovados**, sem falhas ou erros: 7 de cobertura por bairro, 19 de exploração, 13 de velocidade/rastro e 5 de progresso/resumo. A execução final reutilizou esses resultados porque o núcleo permaneceu inalterado.
+- `:app:assembleDebug`, `:app:lintDebug` e `:app:assembleDebugAndroidTest`: **BUILD SUCCESSFUL**. Lint: **0 erros e 14 avisos**. O lint foi repetido após corrigir o escape do caminho do SDK em `local.properties`; a configuração e a chave continuam fora do Git.
+- `python scripts/check_migration_sql.py`: aprovado. Migrações reais **1→2→3→4→5** comparadas ao schema Room 5 gerado pelo KSP; preservação de células e títulos, atividade antiga convertida para carro, deduplicação e separação de créditos por atividade/real-simulado/versão, reabertura, retenção e rollback conferidos em SQLite do computador.
+- `python scripts/check_curitiba_data.py`: aprovado. **75 bairros**, **43.655 partes de vias**, referências válidas, geometrias finitas, remoção de duplicatas exatas, modalidades, versão e quilômetros por bairro consistentes com `data/curitiba/totals.json`.
+- `git diff --check`: sem problemas de espaços.
+
+Os testes do núcleo cobrem ruas parcialmente percorridas, ida/volta e repetição, janela de passos curtos, limites de movimento, precisão ruim, lacunas, deriva pequena, vias paralelas ambíguas, partes em bairros distintos e escala/parada de caminhada. O trajeto simulado de Curitiba passa inteiro pelo filtro sem saltos; coordenadas consecutivas duplicadas recebidas do serviço de rotas são removidas na preparação da geometria.
+
+## Pacote e fontes
+
+APK: `dist/expo-world-0.3.0-debug.apk` (também copiado para `dist/expo-world-mapa-debug.apk`), versão 0.3.0, versionCode 6. Build feito com a configuração MapTiler local existente, sem novo teste HTTP com a chave.
+
+SHA-256 do APK: `CE6E0AB4F78CADEF56A6E57AB745CD7E978CB451984D619500406213765F9B37`.
+
+Limites IBGE/Censo 2022, referência 31/07/2022; ruas OpenStreetMap, timestamp **2026-10-15T19:38:21Z**. Base `curitiba-167e3e15fb46`, distribuída em assets para funcionar sem consulta de cobertura online. Fonte, condições de uso, ODbL, método e limitações estão em `data/curitiba/README.md` e no README principal. O catálogo de vias é lido por streaming em um dispatcher de trabalho, indexado espacialmente e consultado apenas perto de cada deslocamento.
+
+Totais estimados dos eixos elegíveis: carro 5.831,264 km; caminhada 6.084,683 km; bicicleta 6.106,774 km. Estes números não representam um levantamento de campo nem garantia de acesso, segurança ou completude.
+
+## Pendente em Android
+
+**Sete testes instrumentados compilados, não executados.** Incluem persistência, migração, isolamento, atividade dos trajetos salvos, deduplicação de ruas e leitura do catálogo com reconhecimento da simulação. `adb devices` retornou lista vazia. Não houve validação visual, benchmark de memória/desempenho, caminhada/bicicleta com GPS real nem teste de tela bloqueada nesta alteração.
+
+A migração preserva os dados antigos, mas o progresso de ruas começa com novos registros. A névoa antiga não permite reconstruir com confiança a rua percorrida. As porcentagens são estimativas com partes de até 10 m, tolerância de GPS de 12 m, rejeição de ambiguidades e possíveis omissões/atribuições incorretas. Atualizar a versão da base futuramente requer remapeamento explícito; bases diferentes não misturam seus numeradores.
+
+## GitHub
+
+Branch: `codex/curitiba-neighborhood-progress`. Etapas enviadas durante o trabalho: `1d29434` (melhorias anteriores preservadas), `5ba6ef1` (base offline e motor de cobertura), `58683d0` (integração, modalidades, testes e migração), seguidas pelo commit deste registro. Chave, `local.properties`, caches, bancos temporários e APKs não foram versionados.
+
+---
+
+# Registro anterior — 15/10/2026 — simulação nas ruas e trajetos salvos
 
 ## Resultado desta alteração
 
