@@ -1,0 +1,539 @@
+{
+  "metadata": {
+    "version": "curitiba-167e3e15fb46",
+    "retrieved": "2026-10-15",
+    "boundaries": "IBGE Censo 2022 (31/07/2022)",
+    "roadsTimestamp": "2026-10-15T19:38:21Z",
+    "license": "ODbL-1.0",
+    "attribution": "© OpenStreetMap contributors; limites: IBGE, Censo 2022",
+    "binMeters": 10
+  },
+  "roadParts": 43655,
+  "neighborhoods": [
+    {
+      "id": "4106902001",
+      "name": "Centro",
+      "carKm": 62.003,
+      "walkKm": 77.616,
+      "bikeKm": 77.384
+    },
+    {
+      "id": "4106902002",
+      "name": "São Francisco",
+      "carKm": 24.441,
+      "walkKm": 29.067,
+      "bikeKm": 29.178
+    },
+    {
+      "id": "4106902003",
+      "name": "Centro Cívico",
+      "carKm": 18.525,
+      "walkKm": 26.808,
+      "bikeKm": 26.308
+    },
+    {
+      "id": "4106902004",
+      "name": "Alto da Glória",
+      "carKm": 16.553,
+      "walkKm": 17.162,
+      "bikeKm": 18.962
+    },
+    {
+      "id": "4106902005",
+      "name": "Alto da Rua XV",
+      "carKm": 31.385,
+      "walkKm": 33.07,
+      "bikeKm": 33.133
+    },
+    {
+      "id": "4106902006",
+      "name": "Cristo Rei",
+      "carKm": 26.611,
+      "walkKm": 27.668,
+      "bikeKm": 28.181
+    },
+    {
+      "id": "4106902007",
+      "name": "Jardim Botânico",
+      "carKm": 56.905,
+      "walkKm": 79.787,
+      "bikeKm": 71.951
+    },
+    {
+      "id": "4106902008",
+      "name": "Rebouças",
+      "carKm": 56.18,
+      "walkKm": 64.288,
+      "bikeKm": 66.984
+    },
+    {
+      "id": "4106902009",
+      "name": "Água Verde",
+      "carKm": 82.889,
+      "walkKm": 88.209,
+      "bikeKm": 95.082
+    },
+    {
+      "id": "4106902010",
+      "name": "Batel",
+      "carKm": 31.854,
+      "walkKm": 32.99,
+      "bikeKm": 33.756
+    },
+    {
+      "id": "4106902011",
+      "name": "Bigorrilho",
+      "carKm": 50.175,
+      "walkKm": 53.345,
+      "bikeKm": 58.193
+    },
+    {
+      "id": "4106902012",
+      "name": "Mercês",
+      "carKm": 52.656,
+      "walkKm": 57.233,
+      "bikeKm": 57.563
+    },
+    {
+      "id": "4106902013",
+      "name": "Bom Retiro",
+      "carKm": 28.56,
+      "walkKm": 28.792,
+      "bikeKm": 28.792
+    },
+    {
+      "id": "4106902014",
+      "name": "Ahú",
+      "carKm": 29.175,
+      "walkKm": 29.393,
+      "bikeKm": 29.393
+    },
+    {
+      "id": "4106902015",
+      "name": "Juvevê",
+      "carKm": 23.355,
+      "walkKm": 25.847,
+      "bikeKm": 27.901
+    },
+    {
+      "id": "4106902016",
+      "name": "Cabral",
+      "carKm": 31.401,
+      "walkKm": 33.524,
+      "bikeKm": 36.218
+    },
+    {
+      "id": "4106902017",
+      "name": "Hugo Lange",
+      "carKm": 22.136,
+      "walkKm": 24.36,
+      "bikeKm": 24.456
+    },
+    {
+      "id": "4106902018",
+      "name": "Jardim Social",
+      "carKm": 32.041,
+      "walkKm": 33.122,
+      "bikeKm": 33.176
+    },
+    {
+      "id": "4106902019",
+      "name": "Tarumã",
+      "carKm": 72.533,
+      "walkKm": 74.588,
+      "bikeKm": 74.664
+    },
+    {
+      "id": "4106902020",
+      "name": "Capão da Imbuia",
+      "carKm": 63.408,
+      "walkKm": 62.871,
+      "bikeKm": 66.765
+    },
+    {
+      "id": "4106902021",
+      "name": "Cajuru",
+      "carKm": 229.535,
+      "walkKm": 239.286,
+      "bikeKm": 238.481
+    },
+    {
+      "id": "4106902022",
+      "name": "Jardim das Américas",
+      "carKm": 70.93,
+      "walkKm": 85.071,
+      "bikeKm": 79.888
+    },
+    {
+      "id": "4106902023",
+      "name": "Guabirotuba",
+      "carKm": 47.095,
+      "walkKm": 49.416,
+      "bikeKm": 45.834
+    },
+    {
+      "id": "4106902024",
+      "name": "Prado Velho",
+      "carKm": 49.689,
+      "walkKm": 59.773,
+      "bikeKm": 55.979
+    },
+    {
+      "id": "4106902025",
+      "name": "Parolin",
+      "carKm": 46.419,
+      "walkKm": 47.046,
+      "bikeKm": 46.663
+    },
+    {
+      "id": "4106902026",
+      "name": "Guaíra",
+      "carKm": 45.782,
+      "walkKm": 47.014,
+      "bikeKm": 47.895
+    },
+    {
+      "id": "4106902027",
+      "name": "Portão",
+      "carKm": 106.439,
+      "walkKm": 111.761,
+      "bikeKm": 112.241
+    },
+    {
+      "id": "4106902028",
+      "name": "Vila Izabel",
+      "carKm": 23.171,
+      "walkKm": 24.202,
+      "bikeKm": 24.202
+    },
+    {
+      "id": "4106902029",
+      "name": "Seminário",
+      "carKm": 39.112,
+      "walkKm": 41.118,
+      "bikeKm": 41.078
+    },
+    {
+      "id": "4106902030",
+      "name": "Campina do Siqueira",
+      "carKm": 32.751,
+      "walkKm": 35.607,
+      "bikeKm": 36.735
+    },
+    {
+      "id": "4106902031",
+      "name": "Vista Alegre",
+      "carKm": 49.169,
+      "walkKm": 51.566,
+      "bikeKm": 51.401
+    },
+    {
+      "id": "4106902032",
+      "name": "Pilarzinho",
+      "carKm": 93.917,
+      "walkKm": 98.936,
+      "bikeKm": 98.684
+    },
+    {
+      "id": "4106902033",
+      "name": "São Lourenço",
+      "carKm": 27.685,
+      "walkKm": 33.518,
+      "bikeKm": 32.059
+    },
+    {
+      "id": "4106902034",
+      "name": "Boa Vista",
+      "carKm": 84.54,
+      "walkKm": 88.403,
+      "bikeKm": 91.11
+    },
+    {
+      "id": "4106902035",
+      "name": "Bacacheri",
+      "carKm": 92.806,
+      "walkKm": 101.674,
+      "bikeKm": 101.631
+    },
+    {
+      "id": "4106902036",
+      "name": "Bairro Alto",
+      "carKm": 112.143,
+      "walkKm": 118.154,
+      "bikeKm": 117.776
+    },
+    {
+      "id": "4106902037",
+      "name": "Uberaba",
+      "carKm": 226.026,
+      "walkKm": 240.413,
+      "bikeKm": 227.41
+    },
+    {
+      "id": "4106902038",
+      "name": "Hauer",
+      "carKm": 61.011,
+      "walkKm": 64.073,
+      "bikeKm": 65.265
+    },
+    {
+      "id": "4106902039",
+      "name": "Fanny",
+      "carKm": 36.961,
+      "walkKm": 39.249,
+      "bikeKm": 38.288
+    },
+    {
+      "id": "4106902040",
+      "name": "Lindóia",
+      "carKm": 22.557,
+      "walkKm": 22.878,
+      "bikeKm": 22.878
+    },
+    {
+      "id": "4106902041",
+      "name": "Novo Mundo",
+      "carKm": 114.545,
+      "walkKm": 115.756,
+      "bikeKm": 115.483
+    },
+    {
+      "id": "4106902042",
+      "name": "Fazendinha",
+      "carKm": 61.236,
+      "walkKm": 69.31,
+      "bikeKm": 69.287
+    },
+    {
+      "id": "4106902043",
+      "name": "Santa Quitéria",
+      "carKm": 38.533,
+      "walkKm": 39.07,
+      "bikeKm": 39.07
+    },
+    {
+      "id": "4106902044",
+      "name": "Campo Comprido",
+      "carKm": 72.885,
+      "walkKm": 74.969,
+      "bikeKm": 77.241
+    },
+    {
+      "id": "4106902045",
+      "name": "Mossunguê",
+      "carKm": 50.976,
+      "walkKm": 50.951,
+      "bikeKm": 56.763
+    },
+    {
+      "id": "4106902046",
+      "name": "Santo Inácio",
+      "carKm": 43.388,
+      "walkKm": 46.17,
+      "bikeKm": 48.219
+    },
+    {
+      "id": "4106902047",
+      "name": "Cascatinha",
+      "carKm": 20.137,
+      "walkKm": 23.039,
+      "bikeKm": 23.135
+    },
+    {
+      "id": "4106902048",
+      "name": "São João",
+      "carKm": 18.116,
+      "walkKm": 24.995,
+      "bikeKm": 25.017
+    },
+    {
+      "id": "4106902049",
+      "name": "Taboão",
+      "carKm": 20.115,
+      "walkKm": 21.192,
+      "bikeKm": 21.143
+    },
+    {
+      "id": "4106902050",
+      "name": "Abranches",
+      "carKm": 47.596,
+      "walkKm": 49.476,
+      "bikeKm": 49.029
+    },
+    {
+      "id": "4106902051",
+      "name": "Cachoeira",
+      "carKm": 27.747,
+      "walkKm": 28.981,
+      "bikeKm": 28.967
+    },
+    {
+      "id": "4106902052",
+      "name": "Barreirinha",
+      "carKm": 50.901,
+      "walkKm": 55.318,
+      "bikeKm": 55.114
+    },
+    {
+      "id": "4106902053",
+      "name": "Santa Cândida",
+      "carKm": 109.063,
+      "walkKm": 109.233,
+      "bikeKm": 110.333
+    },
+    {
+      "id": "4106902054",
+      "name": "Tinguí",
+      "carKm": 36.184,
+      "walkKm": 34.939,
+      "bikeKm": 35.9
+    },
+    {
+      "id": "4106902055",
+      "name": "Atuba",
+      "carKm": 78.465,
+      "walkKm": 75.817,
+      "bikeKm": 78.341
+    },
+    {
+      "id": "4106902056",
+      "name": "Boqueirão",
+      "carKm": 205.081,
+      "walkKm": 227.435,
+      "bikeKm": 239.46
+    },
+    {
+      "id": "4106902057",
+      "name": "Xaxim",
+      "carKm": 153.915,
+      "walkKm": 154.886,
+      "bikeKm": 153.991
+    },
+    {
+      "id": "4106902058",
+      "name": "Capão Raso",
+      "carKm": 90.5,
+      "walkKm": 95.26,
+      "bikeKm": 97.475
+    },
+    {
+      "id": "4106902059",
+      "name": "Orleans",
+      "carKm": 52.564,
+      "walkKm": 49.455,
+      "bikeKm": 50.66
+    },
+    {
+      "id": "4106902060",
+      "name": "São Braz",
+      "carKm": 74.274,
+      "walkKm": 76.745,
+      "bikeKm": 76.745
+    },
+    {
+      "id": "4106902061",
+      "name": "Botiatuvinha",
+      "carKm": 79.793,
+      "walkKm": 73.608,
+      "bikeKm": 73.592
+    },
+    {
+      "id": "4106902062",
+      "name": "Lamenha Pequena",
+      "carKm": 12.14,
+      "walkKm": 10.782,
+      "bikeKm": 10.782
+    },
+    {
+      "id": "4106902063",
+      "name": "Santa Felicidade",
+      "carKm": 148.393,
+      "walkKm": 153.027,
+      "bikeKm": 153.139
+    },
+    {
+      "id": "4106902064",
+      "name": "Alto Boqueirão",
+      "carKm": 130.807,
+      "walkKm": 141.073,
+      "bikeKm": 141.705
+    },
+    {
+      "id": "4106902065",
+      "name": "Sítio Cercado",
+      "carKm": 247.586,
+      "walkKm": 247.476,
+      "bikeKm": 248.838
+    },
+    {
+      "id": "4106902066",
+      "name": "Pinheirinho",
+      "carKm": 143.671,
+      "walkKm": 149.482,
+      "bikeKm": 148.812
+    },
+    {
+      "id": "4106902067",
+      "name": "São Miguel",
+      "carKm": 31.649,
+      "walkKm": 32.14,
+      "bikeKm": 32.139
+    },
+    {
+      "id": "4106902068",
+      "name": "Augusta",
+      "carKm": 31.165,
+      "walkKm": 38.187,
+      "bikeKm": 38.228
+    },
+    {
+      "id": "4106902069",
+      "name": "Riviera",
+      "carKm": 13.04,
+      "walkKm": 13.007,
+      "bikeKm": 10.766
+    },
+    {
+      "id": "4106902070",
+      "name": "Caximba",
+      "carKm": 26.658,
+      "walkKm": 27.123,
+      "bikeKm": 27.123
+    },
+    {
+      "id": "4106902071",
+      "name": "Campo de Santana",
+      "carKm": 164.813,
+      "walkKm": 166.841,
+      "bikeKm": 164.702
+    },
+    {
+      "id": "4106902072",
+      "name": "Ganchinho",
+      "carKm": 67.081,
+      "walkKm": 67.677,
+      "bikeKm": 67.677
+    },
+    {
+      "id": "4106902073",
+      "name": "Umbará",
+      "carKm": 143.048,
+      "walkKm": 150.012,
+      "bikeKm": 150.153
+    },
+    {
+      "id": "4106902074",
+      "name": "Tatuquara",
+      "carKm": 178.077,
+      "walkKm": 171.518,
+      "bikeKm": 170.799
+    },
+    {
+      "id": "4106902075",
+      "name": "Cidade Industrial de Curitiba",
+      "carKm": 736.597,
+      "walkKm": 720.832,
+      "bikeKm": 723.409
+    }
+  ]
+}
