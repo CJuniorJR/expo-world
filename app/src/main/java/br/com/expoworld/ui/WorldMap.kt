@@ -44,6 +44,7 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
     private var loadFailure = false
     private var fogWarning = ""
     private var selectedNeighborhoodId = ""
+    private var theme = app.theme.value
     private var activity = ActivityKind.CAR
     private fun activityIcon() = when (activity) { ActivityKind.CAR -> "palio-green"; ActivityKind.WALK -> "walker-green"; ActivityKind.BIKE -> "bike-green" }
     val configured = BuildConfig.MAP_STYLE_URL.isNotBlank() || BuildConfig.MAPTILER_KEY.isNotBlank()
@@ -107,10 +108,10 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
             s.addSource(GeoJsonSource("fog", FogGeometry.geoJson(emptyList())))
             s.addLayer(FillLayer("fog-fill", "fog").withProperties(fillColor("#101820"), fillOpacity(.55f), fillAntialias(true)))
             s.addSource(GeoJsonSource("neighborhoods", emptyFeatures))
-            s.addLayer(LineLayer("neighborhood-outlines", "neighborhoods").withProperties(lineColor("#80BAAB"), lineWidth(1f), lineOpacity(.65f)))
+            s.addLayer(LineLayer("neighborhood-outlines", "neighborhoods").withProperties(lineColor(ExplorerTheme.hex(theme.accent)), lineWidth(1f), lineOpacity(.65f)))
             s.addLayer(FillLayer("neighborhood-selected", "neighborhoods")
                 .withFilter(Expression.eq(Expression.get("id"), Expression.literal(selectedNeighborhoodId)))
-                .withProperties(fillColor("#70E1BA"), fillOpacity(.15f)))
+                .withProperties(fillColor(ExplorerTheme.hex(theme.accent)), fillOpacity(.15f)))
             scope.launch {
                 try {
                     val boundaries = withContext(Dispatchers.IO) { app.assets.open("curitiba-neighborhoods.geojson").bufferedReader().use { it.readText() } }
@@ -119,7 +120,7 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
                 catch (_: Exception) { /* The repository reports catalog availability in the menu. */ }
             }
             s.addSource(GeoJsonSource("speed-route", emptyFeatures))
-            s.addLayer(LineLayer("speed-route-outline", "speed-route").withProperties(lineColor("#102027"), lineWidth(10f),
+            s.addLayer(LineLayer("speed-route-outline", "speed-route").withProperties(lineColor(if (theme.light) "#354555" else "#102027"), lineWidth(10f),
                 lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
             s.addLayer(LineLayer("speed-route-color", "speed-route").withProperties(lineColor(Expression.get("color")), lineWidth(6f),
                 lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
@@ -164,6 +165,18 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         else if (following) map?.easeCamera(CameraUpdateFactory.newLatLng(LatLng(orientedFix.latitude, orientedFix.longitude)), if (mode == "simulation") 100 else 700)
     }
     fun center() { position?.let { map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), 16.0)) } }
+    fun setTheme(value: ExplorerTheme) {
+        theme = value
+        style?.let { s ->
+            s.addImage("palio-green", palioPixelArt())
+            s.addImage("walker-green", activityPixelArt(ActivityKind.WALK))
+            s.addImage("bike-green", activityPixelArt(ActivityKind.BIKE))
+            s.getLayerAs<LineLayer>("neighborhood-outlines")?.setProperties(lineColor(ExplorerTheme.hex(value.accent)))
+            s.getLayerAs<FillLayer>("neighborhood-selected")?.setProperties(fillColor(ExplorerTheme.hex(value.accent)))
+            s.getLayerAs<LineLayer>("speed-route-outline")?.setProperties(lineColor(if (value.light) "#354555" else "#102027"))
+        }
+        renderTrace()
+    }
     fun setActivity(value: ActivityKind) {
         activity = value
         style?.getLayerAs<SymbolLayer>("position-palio")?.setProperties(iconImage(activityIcon()))
@@ -195,9 +208,10 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
             s.getSourceAs<GeoJsonSource>("speed-route")?.setGeoJson(emptyFeatures)
             return
         }
+        val palette = theme
         traceJob = scope.launch {
             val json = withContext(Dispatchers.Default) {
-                TracePresentation.lineGeoJson(data.samples, data.activity)
+                TracePresentation.lineGeoJson(data.samples, data.activity, palette)
             }
             ensureActive()
             if (style === s && trace === data) {
@@ -279,13 +293,13 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         )
         val bitmap = Bitmap.createBitmap(16, rows.size, Bitmap.Config.ARGB_8888)
         rows.forEachIndexed { y, row -> row.forEachIndexed { x, pixel -> bitmap.setPixel(x, y, when (pixel) {
-            'D' -> PixelColor.rgb(23, 35, 34); 'G' -> PixelColor.rgb(33, 179, 139)
+            'D' -> PixelColor.rgb(23, 35, 34); 'G' -> (0xFF000000.toInt() or if (theme == ExplorerTheme.GREEN) 0x21B38B else theme.carHighlight)
             'S' -> PixelColor.rgb(214, 217, 185); else -> PixelColor.TRANSPARENT
         }) } }
         return bitmap
     }
 
-    /** Tiny overhead pixel drawing of a green Brazilian compact sedan, facing north. */
+    /** Tiny overhead pixel drawing of a Brazilian Palio, facing north. */
     private fun palioPixelArt(): Bitmap {
         val rows = listOf(
             "........DDDD........",
@@ -320,8 +334,8 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         val width = rows.maxOf { it.length }
         val bitmap = Bitmap.createBitmap(width, rows.size, Bitmap.Config.ARGB_8888)
         val colors = mapOf(
-            'D' to PixelColor.rgb(29, 39, 38), 'G' to PixelColor.rgb(0, 116, 105),
-            'g' to PixelColor.rgb(18, 143, 126), 'Y' to PixelColor.rgb(246, 177, 48),
+            'D' to PixelColor.rgb(29, 39, 38), 'G' to (0xFF000000.toInt() or theme.carBody),
+            'g' to (0xFF000000.toInt() or theme.carHighlight), 'Y' to PixelColor.rgb(246, 177, 48),
             'W' to PixelColor.rgb(122, 192, 199), 'K' to PixelColor.rgb(40, 81, 84),
             'T' to PixelColor.rgb(19, 28, 28), 'S' to PixelColor.rgb(161, 180, 172)
         )

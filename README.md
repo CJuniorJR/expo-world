@@ -18,7 +18,7 @@ Sem chave/URL de estilo, há um fundo neutro com orientação clara. Ele permite
 python scripts/check_migration_sql.py
 ```
 
-O APK, quando compilado, fica em `app/build/outputs/apk/debug/app-debug.apk`. A entrega atual também está em `dist/expo-world-0.3.1-debug.apk`. O teste conectado exige um Android conectado por ADB ou emulador iniciado. A verificação Python usa a biblioteca padrão para testar o SQL das migrações em SQLite do computador, sem substituir o teste Room no Android. Relatórios: `core/build/reports/tests/test/index.html` e `app/build/reports/lint-results-debug.html`.
+O APK, quando compilado, fica em `app/build/outputs/apk/debug/app-debug.apk`. A entrega atual também está em `dist/expo-world-0.3.2-debug.apk`. O teste conectado exige um Android conectado por ADB ou emulador iniciado. A verificação Python usa a biblioteca padrão para testar o SQL das migrações em SQLite do computador, sem substituir o teste Room no Android. Relatórios: `core/build/reports/tests/test/index.html` e `app/build/reports/lint-results-debug.html`.
 
 `scripts/bootstrap-build.ps1` pode baixar JDK 17 em `.tools` e executar a compilação, sem alterar a instalação de Java do sistema. `-InstallAndroidSdk` também instala ferramentas Android locais e apresenta as licenças do SDK para revisão/aceitação. O script precisa de acesso à internet; downloads e caches não são versionados. Se já tiver SDK instalado, defina `ANDROID_HOME` ou `sdk.dir`. A primeira execução baixa o Gradle e as dependências.
 
@@ -29,6 +29,12 @@ Na versão 0.2.0 o mapa ocupa a tela inteira, com controles flutuantes e névoa 
 Ao iniciar, o mapa acompanha a posição com transições de câmera. Mover ou girar o mapa com os dedos pausa esse acompanhamento; a mira retoma-o. O menu oferece **Acompanhar minha posição**. Isso só movimenta a câmera: não fornece navegação nem instruções de direção.
 
 O aviso **Sem internet** distingue a conexão do sinal GPS. O registro local continua, e o app tenta recarregar o estilo após a conexão voltar caso seu carregamento tenha falhado. A leitura do estado de rede usa uma permissão normal (`ACCESS_NETWORK_STATE`), sem novo diálogo de permissão e sem enviar dados da exploração.
+
+## Temas
+
+Abra o menu e escolha **Temas**: **Verdinho (padrão original)**, **Azul**, **Vermelho**, **Rosa**, **Amarelo**, **Branco** ou **Preto**. Cada tema combina interface, Palio, pedestre/bicicleta, destaque dos bairros e degradê do rastro. Branco usa interface clara; os demais usam fundos escuros com a cor escolhida. Não há seletor de cores individuais.
+
+A escolha muda imediatamente e fica salva nas preferências locais, inclusive após fechar/reabrir. Sem preferência válida, o app mantém o verdinho original, incluindo pintura e degradê anteriores. O tema também se aplica à visualização dos trajetos salvos, sem alterar suas amostras, quilômetros ou modalidade. Paradas continuam pretas, sem bolinhas; velocidade desconhecida continua cinza. Não altera a base de mapas do provedor nem separa o progresso. Nenhuma migração ou limpeza do banco é necessária.
 
 ## Progresso e resumo
 
@@ -69,7 +75,7 @@ O resumo do rastro mostra distância registrada, tempo entre registros, duraçã
 
 ## Rastro por velocidade
 
-Inicie um **novo** percurso: a linha aparece **ao vivo**, assim que chegar uma leitura válida, e cresce com o trajeto. É preto quando parado (velocidade estimada de até o limiar da atividade), verde-azulado escuro nos trechos lentos, progressivamente mais claro até verde-água muito claro a 60 km/h ou mais. Uma velocidade constante mantém a mesma tonalidade; desacelerar escurece o rastro. Trechos sem velocidade confiável ficam cinza. Ao tocar em **Encerrar exploração**, a última amostra é salva e o mapa tenta enquadrar o resultado, respeitando os controles flutuantes.
+Inicie um **novo** percurso: a linha aparece **ao vivo**, assim que chegar uma leitura válida, e cresce com o trajeto. No tema padrão, é preto quando parado (velocidade estimada de até o limiar da atividade), verde-azulado escuro nos trechos lentos, progressivamente mais claro até verde-água muito claro a 60 km/h ou mais. Uma velocidade constante mantém a mesma tonalidade; desacelerar escurece o rastro. Trechos sem velocidade confiável ficam cinza. Ao tocar em **Encerrar exploração**, a última amostra é salva e o mapa tenta enquadrar o resultado, respeitando os controles flutuantes.
 
 Não há círculos de parada. O rastro fica preto nos trechos parados; quando as coordenadas não mudam, o último segmento de chegada fica preto, sem criar geometria artificial nem unir lacunas. Grupos de leituras a até o limiar da atividade durante pelo menos 5 segundos continuam entrando no resumo. No menu, **Rastro por velocidade** exibe a legenda, número de paradas e duração aproximada acumulada. **Exibir percurso** permite esconder a linha; **Enquadrar percurso** volta à visão do rastro. Velocidade baixa pode representar trânsito, semáforo ou outro motivo: não consultamos dados de trânsito nem inferimos sua causa.
 

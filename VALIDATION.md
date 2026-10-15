@@ -1,3 +1,17 @@
+# Validação — 15/10/2026 — versão 0.3.2 — temas prontos
+
+- Sete temas: Verdinho, Azul, Vermelho, Rosa, Amarelo, Branco e Preto. O **verdinho original continua padrão**, com a mesma pintura do Palio e fórmula/cores do degradê. Branco usa interface clara; demais temas usam fundos escuros.
+- Seletor no menu, alteração imediata de interface, bitmaps do Palio/pedestre/bike, destaque dos bairros, rastro e legenda. Escolha persistida em SharedPreferences; chave ausente/desconhecida retorna ao verde. Não reinicia câmera/estilo, não muda progresso, não altera banco ou amostras dos trajetos salvos. Paradas pretas e lacunas preservadas.
+- **49 testes JVM aprovados**, zero falhas/erros. Quatro testes de tema verificam fallback e sete chaves, paleta original, paradas/velocidade desconhecida em todos os temas e modalidades, recoloração do GeoJSON sem pontos ou conexão de lacunas.
+- `:core:test :app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest`: **BUILD SUCCESSFUL**. Lint: 0 erros, 17 avisos. Sete testes instrumentados compilados, não executados; sem Android conectado para validar aparência e persistência ao reabrir.
+- `python scripts/check_apk_assets.py`: aprovado sobre o APK final; catálogo de Curitiba e nomes de assets preservados. `git diff --check`: aprovado.
+
+APK: `dist/expo-world-0.3.2-debug.apk`, versionCode 8, 64578421 bytes. SHA-256: `E4233E8EE3BB6F073EF933A231434AFDF0DF0B0B96A4ED8B5DFF94A65C3F4E68`.
+
+Branch: `codex/curitiba-neighborhood-progress`. Configuração local MapTiler usada, sem credenciais nos commits.
+
+---
+
 # Validação — 15/10/2026 — versão 0.3.1 — catálogo corrigido e mapa compartilhado
 
 - Causa da indisponibilidade confirmada no APK 0.3.0: o AAPT transformou o asset de entrada `curitiba-network.json.gz` em `assets/curitiba-network.json`, descompactado. O carregador ainda solicitava o nome `.gz`. O pacote agora usa JSON e o carregador abre esse nome por streaming com buffer; o ZIP do APK fornece a compressão.

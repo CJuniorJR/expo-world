@@ -87,19 +87,20 @@ object TracePresentation {
         if (head.sequence < last.sequence || head.elapsedSeconds <= last.elapsedSeconds) return samples
         return if (head.sequence == last.sequence) samples.dropLast(1) + head else samples + head
     }
-    fun color(speedKmh: Double?, brightSpeedKmh: Double = TraceConfig.BRIGHT_SPEED_KMH, stopSpeedKmh: Double = TraceConfig.STOP_SPEED_KMH): String {
+    fun color(speedKmh: Double?, brightSpeedKmh: Double = TraceConfig.BRIGHT_SPEED_KMH, stopSpeedKmh: Double = TraceConfig.STOP_SPEED_KMH, theme: ExplorerTheme = ExplorerTheme.GREEN): String {
         if (speedKmh == null || !speedKmh.isFinite()) return UNKNOWN_COLOR
         if (speedKmh <= stopSpeedKmh) return "#000000"
         val t = (speedKmh / brightSpeedKmh).coerceIn(0.0, 1.0)
         fun channel(dark: Int, light: Int) = (dark + (light - dark) * t).roundToInt()
-        return "#%02X%02X%02X".format(java.util.Locale.ROOT, channel(33, 201), channel(64, 255), channel(74, 241))
+        return "#%02X%02X%02X".format(java.util.Locale.ROOT, channel((theme.traceDark shr 16) and 255, (theme.traceLight shr 16) and 255),
+            channel((theme.traceDark shr 8) and 255, (theme.traceLight shr 8) and 255), channel(theme.traceDark and 255, theme.traceLight and 255))
     }
     fun stops(samples: List<TraceSample>): List<TraceStop> = samples.filter { it.stopId >= 0 }
         .groupBy { it.stopId }.values.mapNotNull { group ->
             val duration = group.maxOf { it.stopSeconds }
             if (duration < TraceConfig.MIN_STOP_SECONDS) null else TraceStop(group.first().latitude, group.first().longitude, duration)
         }
-    fun lineGeoJson(samples: List<TraceSample>, activity: ActivityKind = ActivityKind.CAR): String {
+    fun lineGeoJson(samples: List<TraceSample>, activity: ActivityKind = ActivityKind.CAR, theme: ExplorerTheme = ExplorerTheme.GREEN): String {
         // A stationary GPS has no length. Color its last approach segment black,
         // without inventing a dot or joining across a signal gap.
         val stoppedApproaches = mutableSetOf<Int>()
@@ -114,7 +115,7 @@ object TracePresentation {
         }
         val features = samples.zipWithNext().mapIndexedNotNull { index, (a, b) ->
             if (b.breakBefore || (a.latitude == b.latitude && a.longitude == b.longitude)) null
-            else """{"type":"Feature","properties":{"color":"${if (index + 1 in stoppedApproaches) "#000000" else color(b.speedKmh, activity.brightKmh, activity.stopKmh)}"},"geometry":{"type":"LineString","coordinates":[[${a.longitude},${a.latitude}],[${b.longitude},${b.latitude}]]}}"""
+            else """{"type":"Feature","properties":{"color":"${if (index + 1 in stoppedApproaches) "#000000" else color(b.speedKmh, activity.brightKmh, activity.stopKmh, theme)}"},"geometry":{"type":"LineString","coordinates":[[${a.longitude},${a.latitude}],[${b.longitude},${b.latitude}]]}}"""
         }
         return features.joinToString(",", "{\"type\":\"FeatureCollection\",\"features\":[", "]}")
     }

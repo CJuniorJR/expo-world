@@ -30,20 +30,26 @@ import br.com.expoworld.core.ExplorationProgress
 import br.com.expoworld.core.TripSummary
 import br.com.expoworld.core.ActivityKind
 import br.com.expoworld.core.CityProgress
+import br.com.expoworld.core.ExplorerTheme
 import br.com.expoworld.storage.SavedRoute
 import java.text.NumberFormat
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-private val Ink = Color(0xFF101C22)
-private val Mint = Color(0xFF70E1BA)
-private val Muted = Color(0xFFAFBFC6)
+private val Ink: Color @Composable get() = themeColor(LocalExplorerTheme.current.background)
+private val Mint: Color @Composable get() = themeColor(LocalExplorerTheme.current.accent)
+private val Muted: Color @Composable get() = themeColor(LocalExplorerTheme.current.muted)
+private val Paper: Color @Composable get() = themeColor(LocalExplorerTheme.current.text)
+private val Card: Color @Composable get() = themeColor(LocalExplorerTheme.current.surface)
+private val Tint: Color @Composable get() = themeColor(LocalExplorerTheme.current.tinted)
+private val Track: Color @Composable get() = themeColor(LocalExplorerTheme.current.track)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExplorationScreen(
     worldMap: WorldMap,
+    onThemeChange: (ExplorerTheme) -> Unit,
     state: TrackingState,
     simulatedView: Boolean,
     progress: ExplorationProgress,
@@ -111,13 +117,13 @@ fun ExplorationScreen(
         !online -> "Sem internet"
         else -> "Pronto para explorar"
     }
-    val statusColor = if (waitingGps || !online || mapStatus.isNotEmpty()) Color(0xFFFFD589) else Mint
+    val statusColor = if (waitingGps || !online || mapStatus.isNotEmpty()) if (LocalExplorerTheme.current.light) Color(0xFF805500) else Color(0xFFFFD589) else Mint
     val actionLabel = if (state.active) "Encerrar exploração" else if (simulatedView) "Iniciar trajeto simulado" else when (state.activity) {
         ActivityKind.WALK -> "Iniciar caminhada"; ActivityKind.BIKE -> "Iniciar pedalada"; ActivityKind.CAR -> "Iniciar exploração"
     }
     val actionColors = ButtonDefaults.buttonColors(
         containerColor = if (state.active) Color(0xFFFFB4AB) else Mint,
-        contentColor = Ink
+        contentColor = if (state.active) Color(0xFF35100D) else Ink
     )
 
     Box(Modifier.fillMaxSize()) {
@@ -131,7 +137,7 @@ fun ExplorationScreen(
         Box(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp)) {
             Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically) {
-                Surface(modifier = Modifier.weight(1f, fill = false).padding(end = 12.dp), color = Ink.copy(alpha = .92f), contentColor = Color.White,
+                Surface(modifier = Modifier.weight(1f, fill = false).padding(end = 12.dp), color = Ink.copy(alpha = .92f), contentColor = Paper,
                     shape = RoundedCornerShape(22.dp), shadowElevation = 6.dp) {
                     Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -145,7 +151,7 @@ fun ExplorationScreen(
                     }
                 }
                 FilledTonalIconButton(onClick = { menuOpen = true }, modifier = Modifier.size(56.dp),
-                    colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = Ink, contentColor = Color.White)) {
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = Ink, contentColor = Paper)) {
                     Icon(painterResource(R.drawable.ic_menu), "Abrir menu e informações", modifier = Modifier.size(24.dp))
                 }
             }
@@ -184,7 +190,7 @@ fun ExplorationScreen(
         onDismissRequest = { menuOpen = false },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = Ink,
-        contentColor = Color.White,
+        contentColor = Paper,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     ) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp)
@@ -199,6 +205,7 @@ fun ExplorationScreen(
                     Icon(painterResource(R.drawable.ic_close), "Fechar menu")
                 }
             }
+            ThemePicker(onThemeChange)
             Text("Atividade", style = MaterialTheme.typography.titleMedium)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 ActivityKind.entries.forEach { activity ->
@@ -213,14 +220,14 @@ fun ExplorationScreen(
             NeighborhoodPanel(cityProgress, simulatedView, state.position != null && state.simulated == simulatedView) { id ->
                 onNeighborhoodFocus(id); menuOpen = false
             }
-            Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFF1C2C33), contentColor = Color.White) {
+            Surface(shape = RoundedCornerShape(20.dp), color = Card, contentColor = Paper) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(statusLabel, color = statusColor, style = MaterialTheme.typography.labelLarge)
                     Text(status, style = MaterialTheme.typography.bodyMedium)
                     if (!online) Text("Sem internet: o mapa pode ficar sem ruas novas, mas o GPS e a gravação no aparelho continuam.",
-                        color = Color(0xFFFFD589), style = MaterialTheme.typography.bodySmall)
+                        color = if (LocalExplorerTheme.current.light) Color(0xFF805500) else Color(0xFFFFD589), style = MaterialTheme.typography.bodySmall)
                     if (notificationsHidden) Text("Notificação oculta: encerre pelo app ou pelo gerenciador de apps ativos do Android.",
-                        color = Color(0xFFFFD589), style = MaterialTheme.typography.bodySmall)
+                        color = if (LocalExplorerTheme.current.light) Color(0xFF805500) else Color(0xFFFFD589), style = MaterialTheme.typography.bodySmall)
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -229,17 +236,17 @@ fun ExplorationScreen(
             }
             Text("Suas descobertas ficam salvas neste aparelho e se acumulam entre viagens.", color = Muted,
                 style = MaterialTheme.typography.bodySmall)
-            Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFF183A36), contentColor = Color.White) {
+            Surface(shape = RoundedCornerShape(20.dp), color = Tint, contentColor = Paper) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("✦  ${progress.title}", color = Mint, style = MaterialTheme.typography.titleMedium)
                     LinearProgressIndicator(progress = { progress.progressToNext }, modifier = Modifier.fillMaxWidth(),
-                        color = Mint, trackColor = Color(0xFF2E514D))
+                        color = Mint, trackColor = Track)
                     Text(progress.nextTarget?.let { "Próximo marco: ${areaLabel(it)} descobertos" }
                         ?: "Seu mapa continua crescendo a cada novo caminho.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 }
             }
 
-            HorizontalDivider(color = Color(0xFF2D414A))
+            HorizontalDivider(color = Track)
             Text("Rastro por velocidade", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             trace?.let { Text("Percurso: ${it.activity.label}", color = Muted, style = MaterialTheme.typography.bodySmall) }
             savedRoutes.firstOrNull { it.id == selectedSavedId }?.let { Text(it.title, color = Mint) }
@@ -272,7 +279,9 @@ fun ExplorationScreen(
                         color = Muted, style = MaterialTheme.typography.bodySmall)
                     }
                     Box(Modifier.fillMaxWidth().height(12.dp).background(
-                        Brush.horizontalGradient(listOf(Color.Black, Color(0xFF759FA0), Color(0xFFC9FFF1))), RoundedCornerShape(6.dp)))
+                        Brush.horizontalGradient(listOf(Color.Black,
+                            Color(android.graphics.Color.parseColor(TracePresentation.color(trace.activity.brightKmh / 2, trace.activity.brightKmh, trace.activity.stopKmh, LocalExplorerTheme.current))),
+                            themeColor(LocalExplorerTheme.current.traceLight))), RoundedCornerShape(6.dp)))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("0 km/h", color = Muted, fontSize = 11.sp)
                         Text("${(trace.activity.brightKmh / 2).toInt()} km/h", color = Muted, fontSize = 11.sp)
@@ -318,7 +327,7 @@ fun ExplorationScreen(
                     Text("Tentar carregar mapa")
                 }
             }
-            HorizontalDivider(color = Color(0xFF2D414A))
+            HorizontalDivider(color = Track)
             Text("Localização", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(if (precise) "Localização precisa autorizada" else "Autorize a localização precisa para revelar o caminho", color = Muted,
                 style = MaterialTheme.typography.bodySmall)
@@ -338,7 +347,7 @@ fun ExplorationScreen(
                 OutlinedButton(onClick = onAppSettings, modifier = Modifier.weight(1f)) { Text("Permissões") }
             }
             if (BuildConfig.DEBUG) {
-                HorizontalDivider(color = Color(0xFF2D414A))
+                HorizontalDivider(color = Track)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f).padding(end = 12.dp)) {
                         Text("Trajeto simulado", style = MaterialTheme.typography.titleMedium)
@@ -363,7 +372,7 @@ private fun NeighborhoodPanel(progress: CityProgress, simulated: Boolean, hasPos
     val uriHandler = LocalUriHandler.current
     var expanded by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
-    Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFF183A36), contentColor = Color.White) {
+    Surface(shape = RoundedCornerShape(20.dp), color = Tint, contentColor = Paper) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Curitiba • ruas exploradas", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text("Carro + caminhada + bicicleta • ${if (simulated) "SIMULADO" else "real"}", color = Mint)
@@ -390,7 +399,7 @@ private fun NeighborhoodPanel(progress: CityProgress, simulated: Boolean, hasPos
                     val rows = if (expanded) progress.neighborhoods.filter { it.name.contains(query, ignoreCase = true) }
                         else summary.ifEmpty { progress.neighborhoods.take(3) }
                     rows.forEach { row ->
-                        Surface(onClick = { onFocus(row.id) }, color = Color(0xFF1C2C33), contentColor = Color.White,
+                        Surface(onClick = { onFocus(row.id) }, color = Card, contentColor = Paper,
                             shape = RoundedCornerShape(12.dp)) {
                             Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -398,7 +407,7 @@ private fun NeighborhoodPanel(progress: CityProgress, simulated: Boolean, hasPos
                                     Text(String.format(Locale.forLanguageTag("pt-BR"), "%.1f%%", row.fraction * 100), color = Mint)
                                 }
                                 LinearProgressIndicator(progress = { row.fraction.toFloat() }, color = Mint,
-                                    trackColor = Color(0xFF2E514D), modifier = Modifier.fillMaxWidth())
+                                    trackColor = Track, modifier = Modifier.fillMaxWidth())
                                 Text(if (row.totalMeters > 0) "${distanceLabel(row.visitedMeters)} / ${distanceLabel(row.totalMeters)} estimados • tocar para ver no mapa"
                                     else "Sem vias elegíveis nesta base", color = Muted, style = MaterialTheme.typography.bodySmall)
                             }
@@ -433,10 +442,33 @@ private fun durationLabel(seconds: Double): String {
 
 @Composable
 private fun InfoCard(value: String, label: String, modifier: Modifier) {
-    Surface(modifier = modifier, shape = RoundedCornerShape(20.dp), color = Color(0xFF1C2C33), contentColor = Color.White) {
+    Surface(modifier = modifier, shape = RoundedCornerShape(20.dp), color = Card, contentColor = Paper) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(value, fontSize = 25.sp, fontWeight = FontWeight.Bold, color = Mint)
             Text(label, color = Muted, style = MaterialTheme.typography.labelSmall)
         }
+    }
+}
+
+@Composable
+private fun ThemePicker(onSelect: (ExplorerTheme) -> Unit) {
+    val selected = LocalExplorerTheme.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Temas", style = MaterialTheme.typography.titleMedium)
+        Text("Atual: ${selected.label}${if (selected == ExplorerTheme.GREEN) " • padrão original" else ""}", color = Muted,
+            style = MaterialTheme.typography.bodySmall)
+        ExplorerTheme.entries.chunked(3).forEach { group ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                group.forEach { option ->
+                    FilterChip(selected = selected == option, onClick = { onSelect(option) },
+                        label = { Text(option.label, fontSize = 11.sp) },
+                        leadingIcon = { Box(Modifier.size(10.dp).background(themeColor(option.carHighlight), CircleShape)) })
+                }
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(10.dp).background(Brush.horizontalGradient(
+            listOf(themeColor(selected.traceDark), themeColor(selected.traceLight))), RoundedCornerShape(6.dp)))
+        Text("Interface, ícones e rastro combinam com o tema. Paradas permanecem pretas.", color = Muted,
+            style = MaterialTheme.typography.bodySmall)
     }
 }

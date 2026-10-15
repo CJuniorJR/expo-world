@@ -31,6 +31,7 @@ import br.com.expoworld.core.TracePresentation
 import br.com.expoworld.location.*
 import br.com.expoworld.ui.WorldMap
 import br.com.expoworld.ui.ExplorationScreen
+import br.com.expoworld.ui.ExplorerAppearance
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.maplibre.android.MapLibre
@@ -86,7 +87,14 @@ class MainActivity : ComponentActivity() {
         worldMap.view.onCreate(savedInstanceState)
         worldMap.initialize()
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xFF70E1BA))) {
+            val theme by app.theme.collectAsStateWithLifecycle()
+            LaunchedEffect(theme) {
+                worldMap.setTheme(theme)
+                enableEdgeToEdge(
+                    statusBarStyle = if (theme.light) SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT) else SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+                    navigationBarStyle = if (theme.light) SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT) else SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
+            }
+            ExplorerAppearance(theme) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
@@ -183,6 +191,7 @@ class MainActivity : ComponentActivity() {
         } else state.message
         ExplorationScreen(
             worldMap = worldMap,
+            onThemeChange = { app.selectTheme(it) },
             state = state,
             simulatedView = viewMode == "simulation",
             progress = progress,
