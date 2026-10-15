@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -27,6 +28,8 @@ import br.com.expoworld.core.RecordedTrace
 import br.com.expoworld.core.TracePresentation
 import br.com.expoworld.core.ExplorationProgress
 import br.com.expoworld.core.TripSummary
+import br.com.expoworld.core.ActivityKind
+import br.com.expoworld.core.CityProgress
 import br.com.expoworld.storage.SavedRoute
 import java.text.NumberFormat
 import java.util.Locale
@@ -44,6 +47,9 @@ fun ExplorationScreen(
     state: TrackingState,
     simulatedView: Boolean,
     progress: ExplorationProgress,
+    cityProgress: CityProgress,
+    onActivityChange: (ActivityKind) -> Unit,
+    onNeighborhoodFocus: (String) -> Unit,
     online: Boolean,
     following: Boolean,
     onFollowingChange: (Boolean) -> Unit,
@@ -92,7 +98,11 @@ fun ExplorationScreen(
     val waitingGps = activeGps && !state.message.startsWith("Explorando")
     val statusLabel = when {
         simulatedView -> "MODO SIMULADO"
-        waitingGps -> if (state.message.contains("GPS desligado")) "GPS desligado" else "Aguardando GPS preciso"
+        waitingGps -> when {
+            state.message.startsWith("Movimento incompatível") -> "Confira a atividade escolhida"
+            state.message.contains("GPS desligado") -> "GPS desligado"
+            else -> "Aguardando GPS preciso"
+        }
         activeGps && !online -> "GPS ativo • sem internet"
         activeGps -> "Explorando"
         mapStatus.startsWith("Aproxime") -> "Aproxime para ver a exploração"
@@ -102,7 +112,9 @@ fun ExplorationScreen(
         else -> "Pronto para explorar"
     }
     val statusColor = if (waitingGps || !online || mapStatus.isNotEmpty()) Color(0xFFFFD589) else Mint
-    val actionLabel = if (state.active) "Encerrar exploração" else if (simulatedView) "Iniciar trajeto simulado" else "Iniciar exploração"
+    val actionLabel = if (state.active) "Encerrar exploração" else if (simulatedView) "Iniciar trajeto simulado" else when (state.activity) {
+        ActivityKind.WALK -> "Iniciar caminhada"; ActivityKind.BIKE -> "Iniciar pedalada"; ActivityKind.CAR -> "Iniciar exploração"
+    }
     val actionColors = ButtonDefaults.buttonColors(
         containerColor = if (state.active) Color(0xFFFFB4AB) else Mint,
         contentColor = Ink
@@ -187,6 +199,17 @@ fun ExplorationScreen(
                     Icon(painterResource(R.drawable.ic_close), "Fechar menu")
                 }
             }
+            Text("Atividade", style = MaterialTheme.typography.titleMedium)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ActivityKind.entries.forEach { activity ->
+                    FilterChip(selected = state.activity == activity, enabled = !state.active,
+                        onClick = { onActivityChange(activity) }, label = { Text(activity.label, fontSize = 12.sp) },
+                        modifier = Modifier.weight(1f))
+                }
+            }
+            Text(if (state.active) "${state.activity.label} em andamento. Encerre para trocar de atividade."
+                else "Escolha a atividade antes de iniciar. O progresso de ruas é separado para cada atividade.", color = Muted,
+                style = MaterialTheme.typography.bodySmall)
             Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFF1C2C33), contentColor = Color.White) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(statusLabel, color = statusColor, style = MaterialTheme.typography.labelLarge)
@@ -203,6 +226,9 @@ fun ExplorationScreen(
             }
             Text("Suas descobertas ficam salvas neste aparelho e se acumulam entre viagens.", color = Muted,
                 style = MaterialTheme.typography.bodySmall)
+            NeighborhoodPanel(cityProgress, simulatedView, state.position != null && state.simulated == simulatedView) { id ->
+                onNeighborhoodFocus(id); menuOpen = false
+            }
             Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFF183A36), contentColor = Color.White) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("✦  ${progress.title}", color = Mint, style = MaterialTheme.typography.titleMedium)
@@ -215,6 +241,7 @@ fun ExplorationScreen(
 
             HorizontalDivider(color = Color(0xFF2D414A))
             Text("Rastro por velocidade", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            trace?.let { Text("Percurso: ${it.activity.label}", color = Muted, style = MaterialTheme.typography.bodySmall) }
             savedRoutes.firstOrNull { it.id == selectedSavedId }?.let { Text(it.title, color = Mint) }
             when {
                 trace == null || trace.samples.isEmpty() -> Text(if (state.active) "Aguardando a primeira posição precisa para desenhar o rastro ao vivo."
@@ -235,8 +262,9 @@ fun ExplorationScreen(
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         InfoCard(durationLabel(currentSummary.stoppedSeconds), "parado • estimativa", Modifier.weight(1f))
-                        InfoCard(currentSummary.averageKmh?.let { String.format(Locale.forLanguageTag("pt-BR"), "%.0f km/h", it) } ?: "—",
-                            "ritmo médio • GPS", Modifier.weight(1f))
+                        InfoCard(if (trace.activity == ActivityKind.WALK) paceLabel(currentSummary.averageKmh)
+                            else currentSummary.averageKmh?.let { String.format(Locale.forLanguageTag("pt-BR"), "%.0f km/h", it) } ?: "—",
+                            if (trace.activity == ActivityKind.WALK) "ritmo médio • min/km" else "velocidade média • GPS", Modifier.weight(1f))
                     }
                     if (currentSummary.missingGpsSeconds >= 1) Text("${durationLabel(currentSummary.missingGpsSeconds)} sem continuidade de sinal; lacunas não entram na distância.",
                         color = Muted, style = MaterialTheme.typography.bodySmall)
@@ -247,10 +275,10 @@ fun ExplorationScreen(
                         Brush.horizontalGradient(listOf(Color.Black, Color(0xFF759FA0), Color(0xFFC9FFF1))), RoundedCornerShape(6.dp)))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("0 km/h", color = Muted, fontSize = 11.sp)
-                        Text("30 km/h", color = Muted, fontSize = 11.sp)
-                        Text("60+ km/h", color = Muted, fontSize = 11.sp)
+                        Text("${(trace.activity.brightKmh / 2).toInt()} km/h", color = Muted, fontSize = 11.sp)
+                        Text("${trace.activity.brightKmh.toInt()}+ km/h", color = Muted, fontSize = 11.sp)
                     }
-                    Text("Preto: parado (até 3 km/h). Escuro: lento. Claro: mais rápido. Cinza: velocidade não estimada.", color = Muted,
+                    Text("Preto: parado (até ${trace.activity.stopKmh} km/h). Escuro: lento. Claro: mais rápido. Cinza: velocidade não estimada.", color = Muted,
                         style = MaterialTheme.typography.bodySmall)
                     val stoppedSeconds = currentSummary?.stoppedSeconds?.toInt() ?: 0
                     Text("${currentSummary?.stops ?: 0} paradas detectadas • ${stoppedSeconds / 60} min ${stoppedSeconds % 60} s",
@@ -276,7 +304,7 @@ fun ExplorationScreen(
                     OutlinedButton(enabled = !state.active, onClick = { onSavedRouteSelect(saved.id); menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.fillMaxWidth()) {
                             Text(saved.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+                            Text(ActivityKind.fromKey(saved.activity).label + " • " + java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
                                 .format(java.util.Date(saved.startedAtMillis)), style = MaterialTheme.typography.bodySmall)
                         }
                     }
@@ -323,11 +351,69 @@ fun ExplorationScreen(
             }
             Button(onClick = { onTripToggle(); menuOpen = false }, colors = actionColors, shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) { Text(actionLabel, fontWeight = FontWeight.SemiBold) }
-            Text("Prepare a viagem antes de dirigir. Durante o percurso, o app funciona de forma passiva.", color = Muted,
+            Text("Prepare seu percurso antes de sair. Durante a atividade, o app funciona de forma passiva.", color = Muted,
                 style = MaterialTheme.typography.bodySmall)
             Text("Expo World  ${BuildConfig.VERSION_NAME}", color = Muted.copy(alpha = .7f), style = MaterialTheme.typography.labelSmall)
         }
     }
+}
+
+@Composable
+private fun NeighborhoodPanel(progress: CityProgress, simulated: Boolean, hasPosition: Boolean, onFocus: (String) -> Unit) {
+    val uriHandler = LocalUriHandler.current
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFF183A36), contentColor = Color.White) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Curitiba • ruas exploradas", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("${progress.activity.label}${if (simulated) " • SIMULADO" else " • real"}", color = Mint)
+            when {
+                progress.error != null -> Text(progress.error.orEmpty(), color = Muted)
+                progress.neighborhoods.isEmpty() -> Text("Carregando base offline de Curitiba…", color = Muted)
+                else -> {
+                    Text("${distanceLabel(progress.visitedMeters)} de ${distanceLabel(progress.totalMeters)} • estimativa", color = Mint)
+                    val current = progress.neighborhoods.firstOrNull { it.id == progress.currentNeighborhoodId }
+                    Text(current?.let { "Você está em ${it.name}" } ?: if (hasPosition) "Sua posição está fora dos bairros de Curitiba desta base."
+                        else "Aguardando posição para identificar o bairro.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    Text("Trechos únicos de aproximadamente 10 m. Repetições não somam; GPS impreciso pode deixar trechos sem crédito.",
+                        color = Muted, style = MaterialTheme.typography.bodySmall)
+                    OutlinedButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (expanded) "Mostrar resumo" else "Ver os ${progress.neighborhoods.size} bairros")
+                    }
+                    if (expanded) OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Buscar bairro") },
+                        singleLine = true, modifier = Modifier.fillMaxWidth())
+                    val rows = if (expanded) progress.neighborhoods.filter { it.name.contains(query, ignoreCase = true) }
+                        else listOfNotNull(current) + progress.neighborhoods.filter { it.visitedMeters > 0 && it.id != current?.id }
+                            .sortedByDescending { it.fraction }.take(4)
+                    rows.forEach { row ->
+                        Surface(onClick = { onFocus(row.id) }, color = Color(0xFF1C2C33), contentColor = Color.White,
+                            shape = RoundedCornerShape(12.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(row.name, modifier = Modifier.weight(1f).padding(end = 8.dp))
+                                    Text(String.format(Locale.forLanguageTag("pt-BR"), "%.1f%%", row.fraction * 100), color = Mint)
+                                }
+                                LinearProgressIndicator(progress = { row.fraction.toFloat() }, color = Mint,
+                                    trackColor = Color(0xFF2E514D), modifier = Modifier.fillMaxWidth())
+                                Text(if (row.totalMeters > 0) "${distanceLabel(row.visitedMeters)} / ${distanceLabel(row.totalMeters)} estimados • tocar para ver no mapa"
+                                    else "Sem vias elegíveis nesta base", color = Muted, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                    if (expanded && rows.isEmpty()) Text("Nenhum bairro encontrado.", color = Muted)
+                    Text("Limites: IBGE/Censo 2022. Ruas: © OpenStreetMap contributors, ODbL 1.0 • ${progress.sourceDate.substringBefore('T')}. Não indica rota segura ou acessibilidade.",
+                        color = Muted, style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { uriHandler.openUri("https://www.openstreetmap.org/copyright") }) { Text("Licença dos dados OpenStreetMap") }
+                }
+            }
+        }
+    }
+}
+
+private fun paceLabel(kmh: Double?): String {
+    if (kmh == null || kmh <= .2) return "—"
+    val seconds = (3600 / kmh).toInt()
+    return "%d:%02d".format(seconds / 60, seconds % 60)
 }
 
 private fun areaLabel(squareMeters: Double): String = if (squareMeters >= 10_000)

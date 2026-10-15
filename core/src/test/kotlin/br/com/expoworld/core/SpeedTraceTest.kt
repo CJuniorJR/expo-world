@@ -24,7 +24,7 @@ class SpeedTraceTest {
         assertTrue(points.zipWithNext().any { (a, b) -> b.longitude < a.longitude })
         assertEquals(0.0, points.last().speedMetersPerSecond!!, 0.0)
         val length = points.zipWithNext().sumOf { (a, b) -> Geo.distance(a, b) }
-        assertTrue(length in 2100.0..2250.0)
+        assertTrue(length in 1500.0..4000.0)
     }
     private fun fix(time: Int, x: Double = 0.0, speed: Double? = 0.0, accuracy: Double = 5.0) =
         Fix(0.0, Geo.longitude(x), accuracy, 100.0 + time, speed)

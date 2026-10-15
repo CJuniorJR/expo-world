@@ -24,6 +24,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.com.expoworld.core.Fix
+import br.com.expoworld.core.ActivityKind
+import br.com.expoworld.core.CityProgress
 import br.com.expoworld.core.ExplorationProgress
 import br.com.expoworld.core.TracePresentation
 import br.com.expoworld.location.*
@@ -109,7 +111,7 @@ class MainActivity : ComponentActivity() {
         pendingStart = false
         if (app.tracking.value.active) return
         if (!fineGranted()) { requestLocation(true); return }
-        runCatching { ContextCompat.startForegroundService(this, Intent(this, ExplorationService::class.java)) }
+        runCatching { ContextCompat.startForegroundService(this, Intent(this, ExplorationService::class.java).putExtra("activity", app.tracking.value.activity.key)) }
             .onFailure { app.tracking.update { it.copy(message = "Não foi possível iniciar. Mantenha o app aberto e confira as permissões.") } }
     }
     private fun stopTrip() {
@@ -134,6 +136,14 @@ class MainActivity : ComponentActivity() {
         val progressFlow = remember(viewMode) { app.repository.progress(viewMode) }
         val progressValue by progressFlow.collectAsStateWithLifecycle(ExplorationProgress(mode = viewMode))
         val progress = progressValue.takeIf { it.mode == viewMode } ?: ExplorationProgress(mode = viewMode)
+        val cityFlow = remember(viewMode, state.activity) { app.city.progress(viewMode, state.activity) }
+        val cityValue by cityFlow.collectAsStateWithLifecycle(CityProgress(activity = state.activity))
+        var currentNeighborhood by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(state.position, viewMode) {
+            currentNeighborhood = app.city.neighborhoodAt(state.position.takeIf { state.simulated == (viewMode == "simulation") })
+        }
+        val cityProgress = (cityValue.takeIf { it.activity == state.activity } ?: CityProgress(activity = state.activity))
+            .copy(currentNeighborhoodId = currentNeighborhood)
         val online by connectivity.online.collectAsStateWithLifecycle()
         val isFollowing by following
         val traceFlow = remember(viewMode) { app.repository.route(viewMode) }
@@ -159,6 +169,7 @@ class MainActivity : ComponentActivity() {
         val permissionsRevision by permissionVersion
         val precise = remember(permissionsRevision) { fineGranted() }
         LaunchedEffect(viewMode, progress.cells) { worldMap.setMode(viewMode) }
+        LaunchedEffect(state.activity) { worldMap.setActivity(state.activity) }
         LaunchedEffect(state.position, viewMode) { worldMap.updatePosition(state.position.takeIf { state.simulated == (viewMode == "simulation") }) }
         LaunchedEffect(state.active, route?.startedAtMillis, route?.completed, viewMode) {
             if (!state.active && route?.completed == true) { traceVisible = true; worldMap.focusTrace(route) }
@@ -176,6 +187,11 @@ class MainActivity : ComponentActivity() {
             state = state,
             simulatedView = viewMode == "simulation",
             progress = progress,
+            cityProgress = cityProgress,
+            onActivityChange = { activity ->
+                if (!state.active) { selectedSavedId = null; app.tracking.update { it.copy(activity = activity) } }
+            },
+            onNeighborhoodFocus = { worldMap.focusNeighborhood(it) },
             online = online,
             following = isFollowing,
             onFollowingChange = { worldMap.setFollowing(it) },

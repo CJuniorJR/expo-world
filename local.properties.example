@@ -1,6 +1,6 @@
 # Copy to local.properties (ignored by Git).
-# Android Studio usually fills sdk.dir automatically. Use forward slashes on Windows.
-sdk.dir=C:/Users/YOUR_USER/AppData/Local/Android/Sdk
+# Android Studio usually fills sdk.dir automatically. Use forward slashes and escape the drive colon.
+sdk.dir=C\:/Users/YOUR_USER/AppData/Local/Android/Sdk
 MAPTILER_KEY=YOUR_DEVELOPMENT_KEY
 # Optional MapTiler style override. Set a full URL containing its key:
 # MAP_STYLE_URL=https://api.maptiler.com/maps/streets-v4/style.json?key=YOUR_DEVELOPMENT_KEY

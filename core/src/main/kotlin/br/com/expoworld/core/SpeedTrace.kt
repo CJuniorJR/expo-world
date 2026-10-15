@@ -16,14 +16,14 @@ data class TraceSample(
     val speedKmh: Double?, val breakBefore: Boolean, val stopId: Int, val stopSeconds: Double
 )
 data class RecordedTrace(val startedAtMillis: Long, val endedAtMillis: Long, val samples: List<TraceSample>,
-    val mode: String = "real", val completed: Boolean = true)
+    val mode: String = "real", val completed: Boolean = true, val activity: ActivityKind = ActivityKind.CAR)
 data class TraceStop(val latitude: Double, val longitude: Double, val durationSeconds: Double)
 
 /** Called only for fixes accepted by FixFilter. GPS speed is preferred; fallback
  * displacement uses a >=4-second window and requires accuracy <=10 m.
  * Unknown speed stays unknown. Gaps reset smoothing and stop durations.
  */
-class TraceSampler {
+class TraceSampler(private val stopSpeedKmh: Double = TraceConfig.STOP_SPEED_KMH) {
     private val window = ArrayDeque<Fix>()
     private var origin: Double? = null
     private var lastTime: Double? = null
@@ -57,7 +57,7 @@ class TraceSampler {
         val dt = lastTime?.let { (time - it).coerceAtLeast(0.0) } ?: 0.0
         smoothSpeed = if (rawKmh == null) null else smoothSpeed?.let { old -> old + (1 - exp(-dt / 3.0)) * (rawKmh - old) } ?: rawKmh
         lastTime = time
-        if (smoothSpeed != null && smoothSpeed!! <= TraceConfig.STOP_SPEED_KMH) {
+        if (smoothSpeed != null && smoothSpeed!! <= stopSpeedKmh) {
             if (stopStart == null) { stopStart = time; stopId = nextStopId++ }
         } else { stopStart = null; stopId = -1 }
         val stopSeconds = stopStart?.let { time - it } ?: 0.0
@@ -87,10 +87,10 @@ object TracePresentation {
         if (head.sequence < last.sequence || head.elapsedSeconds <= last.elapsedSeconds) return samples
         return if (head.sequence == last.sequence) samples.dropLast(1) + head else samples + head
     }
-    fun color(speedKmh: Double?): String {
+    fun color(speedKmh: Double?, brightSpeedKmh: Double = TraceConfig.BRIGHT_SPEED_KMH, stopSpeedKmh: Double = TraceConfig.STOP_SPEED_KMH): String {
         if (speedKmh == null || !speedKmh.isFinite()) return UNKNOWN_COLOR
-        if (speedKmh <= TraceConfig.STOP_SPEED_KMH) return "#000000"
-        val t = (speedKmh / TraceConfig.BRIGHT_SPEED_KMH).coerceIn(0.0, 1.0)
+        if (speedKmh <= stopSpeedKmh) return "#000000"
+        val t = (speedKmh / brightSpeedKmh).coerceIn(0.0, 1.0)
         fun channel(dark: Int, light: Int) = (dark + (light - dark) * t).roundToInt()
         return "#%02X%02X%02X".format(java.util.Locale.ROOT, channel(33, 201), channel(64, 255), channel(74, 241))
     }
@@ -99,7 +99,7 @@ object TracePresentation {
             val duration = group.maxOf { it.stopSeconds }
             if (duration < TraceConfig.MIN_STOP_SECONDS) null else TraceStop(group.first().latitude, group.first().longitude, duration)
         }
-    fun lineGeoJson(samples: List<TraceSample>): String {
+    fun lineGeoJson(samples: List<TraceSample>, activity: ActivityKind = ActivityKind.CAR): String {
         // A stationary GPS has no length. Color its last approach segment black,
         // without inventing a dot or joining across a signal gap.
         val stoppedApproaches = mutableSetOf<Int>()
@@ -108,13 +108,13 @@ object TracePresentation {
             val a = samples[i - 1]; val b = samples[i]
             if (b.breakBefore) { lastMovingSegment = null; continue }
             if (a.latitude != b.latitude || a.longitude != b.longitude) lastMovingSegment = i
-            if (b.speedKmh?.let { it <= TraceConfig.STOP_SPEED_KMH } == true) {
+            if (b.speedKmh?.let { it <= activity.stopKmh } == true) {
                 lastMovingSegment?.let { stoppedApproaches.add(it) }
             }
         }
         val features = samples.zipWithNext().mapIndexedNotNull { index, (a, b) ->
             if (b.breakBefore || (a.latitude == b.latitude && a.longitude == b.longitude)) null
-            else """{"type":"Feature","properties":{"color":"${if (index + 1 in stoppedApproaches) "#000000" else color(b.speedKmh)}"},"geometry":{"type":"LineString","coordinates":[[${a.longitude},${a.latitude}],[${b.longitude},${b.latitude}]]}}"""
+            else """{"type":"Feature","properties":{"color":"${if (index + 1 in stoppedApproaches) "#000000" else color(b.speedKmh, activity.brightKmh, activity.stopKmh)}"},"geometry":{"type":"LineString","coordinates":[[${a.longitude},${a.latitude}],[${b.longitude},${b.latitude}]]}}"""
         }
         return features.joinToString(",", "{\"type\":\"FeatureCollection\",\"features\":[", "]}")
     }

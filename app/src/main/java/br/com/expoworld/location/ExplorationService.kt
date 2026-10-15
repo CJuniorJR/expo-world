@@ -12,6 +12,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import br.com.expoworld.*
 import br.com.expoworld.core.Fix
+import br.com.expoworld.core.ActivityKind
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.update
@@ -31,7 +32,7 @@ class ExplorationService : Service(), LocationListener {
     override fun onCreate() {
         super.onCreate()
         manager = getSystemService(LocationManager::class.java)
-        processor = ExplorationProcessor(app, "real")
+        processor = ExplorationProcessor(app, "real") // Also handles a stale stop intent before a new trip.
         if (Build.VERSION.SDK_INT >= 26) getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, "Exploração em andamento", NotificationManager.IMPORTANCE_LOW)
         )
@@ -39,6 +40,9 @@ class ExplorationService : Service(), LocationListener {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == STOP) { finishTrip(); return START_NOT_STICKY }
         if (started || stopping) return START_NOT_STICKY
+        val activity = ActivityKind.fromKey(intent?.getStringExtra("activity"))
+        processor = ExplorationProcessor(app, "real", activity)
+        app.tracking.update { it.copy(activity = activity) }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             app.tracking.update { it.copy(active = false, message = "Ative a localização precisa nas permissões para revelar uma faixa de 50 m.") }
             stopSelf(); return START_NOT_STICKY
@@ -98,7 +102,7 @@ class ExplorationService : Service(), LocationListener {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val end = PendingIntent.getService(this, 1, Intent(this, ExplorationService::class.java).setAction(STOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_explore)
-            .setContentTitle("Expo World • exploração ativa")
+            .setContentTitle("Expo World • ${app.tracking.value.activity.label}")
             .setContentText("Registrando GPS localmente. Toque em Encerrar para parar.")
             .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
             .addAction(R.drawable.ic_explore, "Encerrar exploração", end).build()

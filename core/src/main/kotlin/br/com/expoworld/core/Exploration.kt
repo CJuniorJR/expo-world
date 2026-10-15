@@ -61,10 +61,14 @@ sealed interface FilterResult {
     data class Rejected(val message: String) : FilterResult
 }
 
-class FixFilter {
+class FixFilter(private val maxSpeed: Double = ExplorationConfig.MAX_SPEED_METERS_SECOND) {
     private var anchor: Fix? = null
     fun breakContinuity() { anchor = null }
     fun accept(fix: Fix, nowSeconds: Double): FilterResult {
+        if (fix.speedMetersPerSecond?.let { it.isFinite() && it > maxSpeed } == true) {
+            breakContinuity()
+            return FilterResult.Rejected("Movimento incompatível com a atividade escolhida. Aguardando nova posição.")
+        }
         if (!fix.latitude.isFinite() || !fix.longitude.isFinite() || abs(fix.latitude) > Geo.MAX_LAT || abs(fix.longitude) > 180 ||
             !fix.accuracy.isFinite() || fix.accuracy <= 0 || fix.accuracy > ExplorationConfig.MAX_ACCURACY_METERS ||
             !fix.monotonicSeconds.isFinite() || nowSeconds - fix.monotonicSeconds !in 0.0..ExplorationConfig.MAX_FIX_AGE_SECONDS) {
@@ -82,7 +86,7 @@ class FixFilter {
             // frequent fixes, allowing both accuracy envelopes and acceleration.
             val inconsistent = dt <= 2.0 && speeds.isNotEmpty() && distance >
                 speeds.max() * dt + old.accuracy + fix.accuracy + 10.0 + 5.0 * dt * dt
-            if (distance / dt > ExplorationConfig.MAX_SPEED_METERS_SECOND || inconsistent) {
+            if (distance / dt > maxSpeed || inconsistent) {
                 // Discard the jump itself, and require a new independent anchor.
                 breakContinuity()
                 return FilterResult.Rejected("Salto de GPS descartado; aguardando nova posição.")

@@ -3,20 +3,24 @@ import json
 from pathlib import Path
 
 root = Path(__file__).resolve().parent.parent
-route = json.loads((root / 'scripts/fixtures/sao-paulo-route.json').read_text())['routes'][0]
+route = json.loads((root / 'scripts/fixtures/curitiba-route.json').read_text())['routes'][0]
 folder = root / 'core/src/main/kotlin/br/com/expoworld/core'
-points = ',\n'.join(f'        Fix({lat}, {lon}, 5.0, 0.0)' for lon, lat in route['geometry']['coordinates'])
+coordinates = []
+for point in route['geometry']['coordinates']:
+    if not coordinates or point != coordinates[-1]:
+        coordinates.append(point)
+points = ',\n'.join(f'        Fix({lat}, {lon}, 5.0, 0.0)' for lon, lat in coordinates)
 (folder / 'SimulatedRoute.kt').write_text('''package br.com.expoworld.core
 
 /** Offline street geometry: © OpenStreetMap contributors, ODbL.
- * Retrieved with OSRM on 2026-10-15; Rua Augusta / Alameda Itu, São Paulo.
+ * Retrieved with OSRM on 2026-10-15; central Curitiba.
  * Source: https://router.project-osrm.org/route/v1/driving/
- * -46.6510,-23.5650;-46.6598,-23.5580;-46.6632,-23.5606?overview=full&geometries=geojson
+ * -49.269,-25.430;-49.276,-25.433;-49.274,-25.441?overview=full&geometries=geojson
  * https://www.openstreetmap.org/copyright
  * Virtual seconds remain physical seconds for filtering and speed analysis.
  */
 object SimulatedRoute {
-    const val PLAYBACK_DELAY_MILLIS = 125L // 8x playback, about 35 seconds.
+    const val PLAYBACK_DELAY_MILLIS = 125L // Accelerated playback; clock adjusted for the activity.
     private val streets = listOf(
 ''' + points + '''
     )
@@ -51,7 +55,7 @@ object SimulatedRoute {
         val fraction = (remaining / lengths[leg]).coerceIn(0.0, 1.0)
         val metersPerSecond = if (i == 0) speed(0) else distances[i] - distances[i - 1]
         return Fix(a.latitude + (b.latitude - a.latitude) * fraction,
-            a.longitude + (b.longitude - a.longitude) * fraction, 5.0, time, metersPerSecond)
+            a.longitude + (b.longitude - a.longitude) * fraction, 5.0, time, metersPerSecond, Geo.bearing(a, b))
     }
 }
 ''', encoding='utf-8')

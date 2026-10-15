@@ -20,7 +20,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 data class ExploredCell(val mode: String, val y: Int, val x: Int)
 
 @Entity(tableName = "route_sessions")
-data class RouteSession(@PrimaryKey val mode: String, val startedAtMillis: Long, val endedAtMillis: Long?, val completed: Boolean)
+data class RouteSession(@PrimaryKey val mode: String, val startedAtMillis: Long, val endedAtMillis: Long?, val completed: Boolean,
+    @ColumnInfo(defaultValue = "'car'") val activity: String = "car")
 
 @Entity(tableName = "route_samples", primaryKeys = ["mode", "sequence"])
 data class RouteSampleRow(
@@ -36,7 +37,14 @@ data class RouteSnapshot(
 data class CellRowCount(val y: Int, val cells: Long)
 
 @Entity(tableName = "saved_routes")
-data class SavedRoute(@PrimaryKey val id: String, val title: String, val startedAtMillis: Long)
+data class SavedRoute(@PrimaryKey val id: String, val title: String, val startedAtMillis: Long,
+    @ColumnInfo(defaultValue = "'car'") val activity: String = "car")
+
+@Entity(tableName = "street_visits", primaryKeys = ["mode", "activity", "dataset", "streetId", "bin"],
+    indices = [Index(value = ["mode", "activity", "dataset", "neighborhoodId"])])
+data class StreetVisit(val mode: String, val activity: String, val dataset: String, val streetId: String,
+    val bin: Int, val neighborhoodId: String, val meters: Double)
+data class NeighborhoodMeters(val neighborhoodId: String, val meters: Double)
 
 private fun RouteSampleRow.toDomain() = TraceSample(sequence, latitude, longitude, elapsedSeconds, speedKmh, breakBefore, stopId, stopSeconds)
 private fun TraceSample.toRow(mode: String) = RouteSampleRow(mode, sequence, latitude, longitude,
@@ -44,6 +52,12 @@ private fun TraceSample.toRow(mode: String) = RouteSampleRow(mode, sequence, lat
 
 @Dao
 interface ExplorationDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertStreetVisits(visits: List<StreetVisit>)
+    @Query("SELECT neighborhoodId, SUM(meters) AS meters FROM street_visits WHERE mode = :mode AND activity = :activity AND dataset = :dataset GROUP BY neighborhoodId")
+    fun streetTotals(mode: String, activity: String, dataset: String): Flow<List<NeighborhoodMeters>>
+    @Query("DELETE FROM street_visits WHERE mode = 'simulation'")
+    suspend fun clearSimulatedVisits()
     @Query("SELECT * FROM saved_routes ORDER BY startedAtMillis DESC, id")
     fun savedRoutes(): Flow<List<SavedRoute>>
     @Insert
@@ -60,7 +74,7 @@ interface ExplorationDao {
         val id = "saved:" + java.util.UUID.randomUUID().toString()
         putSession(session.copy(mode = id))
         points.forEach { putSample(it.copy(mode = id)) }
-        insertSavedRoute(SavedRoute(id, title.trim(), session.startedAtMillis))
+        insertSavedRoute(SavedRoute(id, title.trim(), session.startedAtMillis, session.activity))
     }
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(cells: List<ExploredCell>)
@@ -92,14 +106,15 @@ interface ExplorationDao {
     @Query("SELECT * FROM route_samples WHERE mode = :mode ORDER BY sequence ASC LIMIT 20000")
     suspend fun samples(mode: String): List<RouteSampleRow>
     @Transaction
-    suspend fun beginRoute(mode: String, startedAt: Long) {
+    suspend fun beginRoute(mode: String, startedAt: Long, activity: String = "car") {
         deleteSamples(mode)
-        putSession(RouteSession(mode, startedAt, null, false))
+        putSession(RouteSession(mode, startedAt, null, false, activity))
     }
     @Transaction
-    suspend fun saveAccepted(cells: List<ExploredCell>, sample: RouteSampleRow?, startedAt: Long?) {
-        if (sample != null && startedAt != null) beginRoute(sample.mode, startedAt)
+    suspend fun saveAccepted(cells: List<ExploredCell>, sample: RouteSampleRow?, startedAt: Long?, activity: String = "car", visits: List<StreetVisit> = emptyList()) {
+        if (sample != null && startedAt != null) beginRoute(sample.mode, startedAt, activity)
         insert(cells)
+        if (visits.isNotEmpty()) insertStreetVisits(visits)
         if (sample != null) {
             putSample(sample)
             trimSamples(sample.mode, sample.sequence - TraceConfig.MAX_SAMPLES + 1)
@@ -112,12 +127,21 @@ interface ExplorationDao {
     }
     @Transaction
     suspend fun resetSimulation() {
-        clearSimulation(); deleteSamples("simulation"); deleteSimulationSession()
+        clearSimulation(); deleteSamples("simulation"); deleteSimulationSession(); clearSimulatedVisits()
     }
 }
 
-@Database(entities = [ExploredCell::class, RouteSession::class, RouteSampleRow::class, SavedRoute::class], version = 4, exportSchema = true)
+@Database(entities = [ExploredCell::class, RouteSession::class, RouteSampleRow::class, SavedRoute::class, StreetVisit::class], version = 5, exportSchema = true)
 abstract class ExplorationDatabase : RoomDatabase() { abstract fun cells(): ExplorationDao }
+
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE route_sessions ADD COLUMN activity TEXT NOT NULL DEFAULT 'car'")
+        db.execSQL("ALTER TABLE saved_routes ADD COLUMN activity TEXT NOT NULL DEFAULT 'car'")
+        db.execSQL("CREATE TABLE IF NOT EXISTS street_visits (mode TEXT NOT NULL, activity TEXT NOT NULL, dataset TEXT NOT NULL, streetId TEXT NOT NULL, bin INTEGER NOT NULL, neighborhoodId TEXT NOT NULL, meters REAL NOT NULL, PRIMARY KEY(mode, activity, dataset, streetId, bin))")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_street_visits_mode_activity_dataset_neighborhoodId ON street_visits(mode, activity, dataset, neighborhoodId)")
+    }
+}
 
 val MIGRATION_3_4 = object : Migration(3, 4) {
     override fun migrate(db: SupportSQLiteDatabase) {
@@ -148,14 +172,16 @@ class ExplorationRepository(private val dao: ExplorationDao) {
         // One Room transaction per accepted fix; committed before UI revision changes.
         dao.insert(cells.map { ExploredCell(mode, it.y, it.x) })
     }
-    suspend fun saveAccepted(mode: String, cells: Set<Cell>, sample: TraceSample?, startedAt: Long? = null) = dao.saveAccepted(
-        cells.map { ExploredCell(mode, it.y, it.x) }, sample?.toRow(mode), startedAt
+    suspend fun saveAccepted(mode: String, cells: Set<Cell>, sample: TraceSample?, startedAt: Long? = null,
+        activity: String = "car", visits: List<StreetVisit> = emptyList()) = dao.saveAccepted(
+        cells.map { ExploredCell(mode, it.y, it.x) }, sample?.toRow(mode), startedAt, activity, visits
     )
     suspend fun beginRoute(mode: String) = dao.beginRoute(mode, System.currentTimeMillis())
     suspend fun finishRoute(mode: String, last: TraceSample?) = dao.finishRoute(mode, System.currentTimeMillis(), last?.toRow(mode))
     fun route(mode: String): Flow<RecordedTrace?> = dao.routeSnapshot(mode).map { snapshot ->
         snapshot?.let { RecordedTrace(it.session.startedAtMillis, it.session.endedAtMillis ?: it.session.startedAtMillis,
-            it.samples.sortedBy { row -> row.sequence }.map { row -> row.toDomain() }, mode, it.session.completed) }
+            it.samples.sortedBy { row -> row.sequence }.map { row -> row.toDomain() }, mode, it.session.completed,
+            br.com.expoworld.core.ActivityKind.fromKey(it.session.activity)) }
     }.flowOn(Dispatchers.Default)
     fun completedRoute(mode: String): Flow<RecordedTrace?> = route(mode).map { it?.takeIf { data -> data.completed } }
     fun progress(mode: String): Flow<br.com.expoworld.core.ExplorationProgress> = dao.progressRows(mode).map { rows ->

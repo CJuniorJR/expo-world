@@ -13,6 +13,47 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PersistenceTest {
+    @Test fun bundledCatalogLoadsAndRecognizesTheCuritibaSimulation() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = Room.inMemoryDatabaseBuilder(context, ExplorationDatabase::class.java).build()
+        try {
+            val city = CuritibaRepository(db.cells(), context.assets)
+            val progress = city.progress("real", ActivityKind.CAR).first()
+            assertNull(progress.error)
+            assertEquals(75, progress.neighborhoods.size)
+            assertEquals(5_831_264.0, progress.totalMeters, 1.0)
+            var previous: Fix? = null
+            val credits = mutableSetOf<StreetCredit>()
+            for (i in 0..120) {
+                val fix = SimulatedRoute.fix(i, 100.0 + i)
+                credits.addAll(city.match(previous, fix, ActivityKind.CAR).second)
+                previous = fix
+            }
+            assertTrue(credits.isNotEmpty())
+        } finally { db.close() }
+    }
+    @Test fun streetCoverageIsUniqueAndSavedTripKeepsItsActivity() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = Room.inMemoryDatabaseBuilder(context, ExplorationDatabase::class.java).build()
+        try {
+            val dao = db.cells()
+            val repo = ExplorationRepository(dao)
+            val visit = StreetVisit("real", "walk", "v1", "street", 0, "bairro", 10.0)
+            val point = TraceSample(0, -25.43, -49.27, 0.0, 4.0, true, -1, 0.0)
+            repo.saveAccepted("real", emptySet(), point, 1000L, "walk", listOf(visit, visit))
+            repo.finishRoute("real", null)
+            repo.saveRealRoute("Caminhada", 1000L)
+            val saved = repo.savedRoutes().first().single()
+            assertEquals("walk", saved.activity)
+            assertEquals(ActivityKind.WALK, repo.route(saved.id).first()!!.activity)
+            dao.insertStreetVisits(listOf(visit.copy(activity = "bike"), visit.copy(mode = "simulation")))
+            repo.clearSimulation()
+            assertEquals(10.0, dao.streetTotals("real", "walk", "v1").first().single().meters, .0)
+            assertEquals(10.0, dao.streetTotals("real", "bike", "v1").first().single().meters, .0)
+            assertTrue(dao.streetTotals("simulation", "walk", "v1").first().isEmpty())
+            assertTrue(dao.streetTotals("real", "walk", "v2").first().isEmpty())
+        } finally { db.close() }
+    }
     @Test fun titledRealRouteSurvivesReplacementSimulationResetAndReopen() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "saved-route-test.db"
@@ -44,7 +85,7 @@ class PersistenceTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "persistence-test.db"
         context.deleteDatabase(name)
-        fun open() = Room.databaseBuilder(context, ExplorationDatabase::class.java, name).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
+        fun open() = Room.databaseBuilder(context, ExplorationDatabase::class.java, name).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
         var db = open()
         try {
             val first = Fix(-23.5615, -46.6559, 5.0, 100.0)
@@ -87,7 +128,7 @@ class PersistenceTest {
         old.execSQL("INSERT INTO cells(mode, y, x) VALUES('real', ?, ?)", arrayOf(oldCell.y, oldCell.x))
         old.version = 1
         old.close()
-        val upgraded = Room.databaseBuilder(context, ExplorationDatabase::class.java, name).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
+        val upgraded = Room.databaseBuilder(context, ExplorationDatabase::class.java, name).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
         try {
             val repo = ExplorationRepository(upgraded.cells())
             assertEquals(expanded, repo.visible("real", Geo.bounds(-23.57, -46.67, -23.55, -46.64)).toSet())
