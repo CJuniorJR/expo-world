@@ -1,4 +1,38 @@
-# Validação — 14/10/2026 — versão 0.2.0
+# Validação — 15/10/2026 — simulação nas ruas e trajetos salvos
+
+## Resultado desta alteração
+
+- `:core:test`: **37 testes aprovados**, sem falhas ou erros (19 de exploração, 13 de rastro/velocidade e 5 de resumo/progresso).
+- `:app:assembleDebug`, `:app:assembleDebugAndroidTest` e `:app:lintDebug`: **BUILD SUCCESSFUL**. Lint: **0 erros, 10 avisos**.
+- `python scripts/check_migration_sql.py`: aprovado; migrações **1→2→3→4** conferidas contra o schema 4 gerado pelo Room, preservação da exploração, reabertura, isolamento, retenção e rollback em SQLite do computador.
+- `git diff --check`: sem problemas de espaços.
+
+Novos testes JVM verificam rastro preto ao parar sem deslocamento, preservação de lacunas, curvas e coerência entre velocidade e deslocamento da simulação acelerada. A simulação inteira também passa pelo filtro sem saltos rejeitados.
+
+Os **cinco testes instrumentados** foram compilados, mas não executados em Android. O novo teste verifica título, rejeição de percurso incompleto/título vazio/sessão substituída, preservação da cópia após nova viagem e limpeza da simulação, e reabertura do banco. Não confundir compilação com aprovação desses testes em aparelho.
+
+## Ambiente e reprodução
+
+JDK 17, SDK Platform 36 e Build Tools 35.0.0 instalados localmente em `.tools`. Neste Windows, o Java apresentou `Unable to establish loopback connection` antes da compilação. A configuração específica do diretório de sockets resolveu:
+
+```powershell
+New-Item -ItemType Directory -Force .tools/tmp | Out-Null
+$env:JAVA_TOOL_OPTIONS="-Djdk.net.unixdomain.tmpdir=$PWD/.tools/tmp"
+./scripts/bootstrap-build.ps1 -InstallAndroidSdk -AcceptAndroidSdkLicenses
+python scripts/check_migration_sql.py
+```
+
+APK atual: `app/build/outputs/apk/debug/app-debug.apk`. Não havia `local.properties` neste checkout, portanto este APK usa o mapa neutro sem chave/estilo de tiles. A geometria simulada está incorporada; para conferir seu alinhamento visual com ruas, configure o provedor conforme o README e recompile.
+
+## Pendente em aparelho
+
+Verificar simulação 8× (tempo real depende do processamento), acompanhamento da câmera, rastro preto sem círculos, salvamento e seleção dos trajetos, atualização de banco v3 sem desinstalar e GPS real/segundo plano. Nenhuma validação visual ou de GPS real foi realizada nesta alteração.
+
+---
+
+# Registro histórico — 14/10/2026 — versão 0.2.0
+
+O registro abaixo descreve a entrega anterior; seus APKs, hashes, limites de histórico e resultados não correspondem à alteração de 15/10 acima.
 
 ## Resultado
 

@@ -81,7 +81,9 @@ class ExplorationService : Service(), LocationListener {
     override fun onLocationChanged(location: Location) {
         if (stopping) return
         val reliableSpeed = if (location.hasSpeed() && (Build.VERSION.SDK_INT < 26 || !location.hasSpeedAccuracy() || location.speedAccuracyMetersPerSecond <= 3f)) location.speed.toDouble() else null
-        val fix = Fix(location.latitude, location.longitude, if (location.hasAccuracy()) location.accuracy.toDouble() else Double.POSITIVE_INFINITY, location.elapsedRealtimeNanos / 1e9, reliableSpeed)
+        val reliableBearing = location.bearing.toDouble().takeIf { location.hasBearing() && (reliableSpeed ?: 0.0) > .5 }
+        val fix = Fix(location.latitude, location.longitude, if (location.hasAccuracy()) location.accuracy.toDouble() else Double.POSITIVE_INFINITY,
+            location.elapsedRealtimeNanos / 1e9, reliableSpeed, reliableBearing)
         if (queue.trySend(fix).isFailure) {
             // End cleanly on storage backpressure; never bridge dropped queue entries.
             app.tracking.update { it.copy(message = "Gravação local lenta. Viagem encerrada para preservar os dados já salvos.") }

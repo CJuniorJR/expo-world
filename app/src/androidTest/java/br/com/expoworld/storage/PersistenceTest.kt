@@ -13,11 +13,38 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PersistenceTest {
+    @Test fun titledRealRouteSurvivesReplacementSimulationResetAndReopen() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "saved-route-test.db"
+        context.deleteDatabase(name)
+        fun open() = Room.databaseBuilder(context, ExplorationDatabase::class.java, name).build()
+        var db = open()
+        try {
+            var repo = ExplorationRepository(db.cells())
+            val point = TraceSample(0, -23.56, -46.65, 0.0, 12.0, true, -1, 0.0)
+            repo.saveAccepted("real", emptySet(), point, 1000L)
+            assertTrue(runCatching { repo.saveRealRoute("Em andamento", 1000L) }.isFailure)
+            repo.finishRoute("real", null)
+            assertTrue(runCatching { repo.saveRealRoute("  ", 1000L) }.isFailure)
+            assertTrue(runCatching { repo.saveRealRoute("Outro percurso", 2000L) }.isFailure)
+            repo.saveRealRoute("  Passeio pelo bairro  ", 1000L)
+            val saved = repo.savedRoutes().first().single()
+            assertEquals("Passeio pelo bairro", saved.title)
+            repo.saveAccepted("real", emptySet(), point.copy(longitude = -46.66), 2000L)
+            repo.clearSimulation()
+            db.close()
+            db = open()
+            repo = ExplorationRepository(db.cells())
+            assertEquals(saved, repo.savedRoutes().first().single())
+            assertEquals(listOf(point), repo.route(saved.id).first()!!.samples)
+            assertTrue(repo.route(saved.id).first()!!.completed)
+        } finally { db.close(); context.deleteDatabase(name) }
+    }
     @Test fun explorationSurvivesReopenAndSimulationIsIsolated() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "persistence-test.db"
         context.deleteDatabase(name)
-        fun open() = Room.databaseBuilder(context, ExplorationDatabase::class.java, name).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+        fun open() = Room.databaseBuilder(context, ExplorationDatabase::class.java, name).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
         var db = open()
         try {
             val first = Fix(-23.5615, -46.6559, 5.0, 100.0)
@@ -60,7 +87,7 @@ class PersistenceTest {
         old.execSQL("INSERT INTO cells(mode, y, x) VALUES('real', ?, ?)", arrayOf(oldCell.y, oldCell.x))
         old.version = 1
         old.close()
-        val upgraded = Room.databaseBuilder(context, ExplorationDatabase::class.java, name).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+        val upgraded = Room.databaseBuilder(context, ExplorationDatabase::class.java, name).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
         try {
             val repo = ExplorationRepository(upgraded.cells())
             assertEquals(expanded, repo.visible("real", Geo.bounds(-23.57, -46.67, -23.55, -46.64)).toSet())

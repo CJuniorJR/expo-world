@@ -89,6 +89,7 @@ object TracePresentation {
     }
     fun color(speedKmh: Double?): String {
         if (speedKmh == null || !speedKmh.isFinite()) return UNKNOWN_COLOR
+        if (speedKmh <= TraceConfig.STOP_SPEED_KMH) return "#000000"
         val t = (speedKmh / TraceConfig.BRIGHT_SPEED_KMH).coerceIn(0.0, 1.0)
         fun channel(dark: Int, light: Int) = (dark + (light - dark) * t).roundToInt()
         return "#%02X%02X%02X".format(java.util.Locale.ROOT, channel(33, 201), channel(64, 255), channel(74, 241))
@@ -99,9 +100,21 @@ object TracePresentation {
             if (duration < TraceConfig.MIN_STOP_SECONDS) null else TraceStop(group.first().latitude, group.first().longitude, duration)
         }
     fun lineGeoJson(samples: List<TraceSample>): String {
-        val features = samples.zipWithNext().mapNotNull { (a, b) ->
+        // A stationary GPS has no length. Color its last approach segment black,
+        // without inventing a dot or joining across a signal gap.
+        val stoppedApproaches = mutableSetOf<Int>()
+        var lastMovingSegment: Int? = null
+        for (i in 1 until samples.size) {
+            val a = samples[i - 1]; val b = samples[i]
+            if (b.breakBefore) { lastMovingSegment = null; continue }
+            if (a.latitude != b.latitude || a.longitude != b.longitude) lastMovingSegment = i
+            if (b.speedKmh?.let { it <= TraceConfig.STOP_SPEED_KMH } == true) {
+                lastMovingSegment?.let { stoppedApproaches.add(it) }
+            }
+        }
+        val features = samples.zipWithNext().mapIndexedNotNull { index, (a, b) ->
             if (b.breakBefore || (a.latitude == b.latitude && a.longitude == b.longitude)) null
-            else """{"type":"Feature","properties":{"color":"${color(b.speedKmh)}"},"geometry":{"type":"LineString","coordinates":[[${a.longitude},${a.latitude}],[${b.longitude},${b.latitude}]]}}"""
+            else """{"type":"Feature","properties":{"color":"${if (index + 1 in stoppedApproaches) "#000000" else color(b.speedKmh)}"},"geometry":{"type":"LineString","coordinates":[[${a.longitude},${a.latitude}],[${b.longitude},${b.latitude}]]}}"""
         }
         return features.joinToString(",", "{\"type\":\"FeatureCollection\",\"features\":[", "]}")
     }

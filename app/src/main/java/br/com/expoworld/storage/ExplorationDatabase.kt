@@ -35,12 +35,33 @@ data class RouteSnapshot(
 )
 data class CellRowCount(val y: Int, val cells: Long)
 
+@Entity(tableName = "saved_routes")
+data class SavedRoute(@PrimaryKey val id: String, val title: String, val startedAtMillis: Long)
+
 private fun RouteSampleRow.toDomain() = TraceSample(sequence, latitude, longitude, elapsedSeconds, speedKmh, breakBefore, stopId, stopSeconds)
 private fun TraceSample.toRow(mode: String) = RouteSampleRow(mode, sequence, latitude, longitude,
     elapsedSeconds, speedKmh, breakBefore, stopId, stopSeconds)
 
 @Dao
 interface ExplorationDao {
+    @Query("SELECT * FROM saved_routes ORDER BY startedAtMillis DESC, id")
+    fun savedRoutes(): Flow<List<SavedRoute>>
+    @Insert
+    suspend fun insertSavedRoute(route: SavedRoute)
+    @Query("SELECT * FROM route_sessions WHERE mode = 'real'")
+    suspend fun realSession(): RouteSession?
+    @Transaction
+    suspend fun saveRealRoute(title: String, expectedStart: Long) {
+        require(title.trim().length in 1..80)
+        val session = checkNotNull(realSession())
+        check(session.completed && session.startedAtMillis == expectedStart)
+        val points = samples("real")
+        check(points.isNotEmpty())
+        val id = "saved:" + java.util.UUID.randomUUID().toString()
+        putSession(session.copy(mode = id))
+        points.forEach { putSample(it.copy(mode = id)) }
+        insertSavedRoute(SavedRoute(id, title.trim(), session.startedAtMillis))
+    }
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(cells: List<ExploredCell>)
     @Query("SELECT * FROM cells WHERE mode = :mode AND y BETWEEN :minY AND :maxY AND x BETWEEN :minX AND :maxX LIMIT :limit")
@@ -95,8 +116,14 @@ interface ExplorationDao {
     }
 }
 
-@Database(entities = [ExploredCell::class, RouteSession::class, RouteSampleRow::class], version = 3, exportSchema = true)
+@Database(entities = [ExploredCell::class, RouteSession::class, RouteSampleRow::class, SavedRoute::class], version = 4, exportSchema = true)
 abstract class ExplorationDatabase : RoomDatabase() { abstract fun cells(): ExplorationDao }
+
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS saved_routes (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, startedAtMillis INTEGER NOT NULL)")
+    }
+}
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
     override fun migrate(db: SupportSQLiteDatabase) {
@@ -115,6 +142,8 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
 }
 
 class ExplorationRepository(private val dao: ExplorationDao) {
+    fun savedRoutes() = dao.savedRoutes()
+    suspend fun saveRealRoute(title: String, expectedStart: Long) = dao.saveRealRoute(title, expectedStart)
     suspend fun save(mode: String, cells: Set<Cell>) {
         // One Room transaction per accepted fix; committed before UI revision changes.
         dao.insert(cells.map { ExploredCell(mode, it.y, it.x) })

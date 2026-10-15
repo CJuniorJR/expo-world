@@ -1,6 +1,8 @@
 package br.com.expoworld.ui
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Color as PixelColor
 import androidx.core.view.doOnLayout
 import br.com.expoworld.BuildConfig
 import br.com.expoworld.WorldApp
@@ -102,15 +104,17 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
             s.addSource(GeoJsonSource("fog", FogGeometry.geoJson(emptyList())))
             s.addLayer(FillLayer("fog-fill", "fog").withProperties(fillColor("#101820"), fillOpacity(.55f), fillAntialias(true)))
             s.addSource(GeoJsonSource("speed-route", emptyFeatures))
-            s.addSource(GeoJsonSource("speed-stops", emptyFeatures))
             s.addLayer(LineLayer("speed-route-outline", "speed-route").withProperties(lineColor("#102027"), lineWidth(10f),
                 lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
             s.addLayer(LineLayer("speed-route-color", "speed-route").withProperties(lineColor(Expression.get("color")), lineWidth(6f),
                 lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
-            s.addLayer(CircleLayer("speed-stop-dots", "speed-stops").withProperties(circleColor("#21404A"), circleRadius(9f),
-                circleStrokeColor("#C9FFF1"), circleStrokeWidth(2.5f)))
+            s.addImage("palio-green", palioPixelArt())
             s.addSource(GeoJsonSource("position"))
-            s.addLayer(CircleLayer("position-dot", "position").withProperties(circleColor("#007DFF"), circleRadius(7f), circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
+            s.addLayer(SymbolLayer("position-palio", "position").withProperties(
+                iconImage("palio-green"), iconSize(1.7f), iconAnchor(Property.ICON_ANCHOR_CENTER),
+                iconRotate(Expression.get("bearing")), iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+                iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_MAP), iconAllowOverlap(true), iconIgnorePlacement(true)
+            ))
             updatePosition(position)
             loadFailure = false
             publishMessage()
@@ -128,11 +132,19 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         refreshFog()
     }
     fun updatePosition(fix: Fix?) {
-        position = fix
-        if (fix == null) return
-        style?.getSourceAs<GeoJsonSource>("position")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(fix.longitude, fix.latitude)))
+        if (fix == null) { position = null; return }
+        val previous = position
+        val bearing = fix.bearingDegrees?.takeIf { it.isFinite() } ?: previous
+            ?.takeIf { Geo.distance(it, fix) > 1.5 && fix.monotonicSeconds > it.monotonicSeconds }
+            ?.let { Geo.bearing(it, fix) } ?: previous?.bearingDegrees ?: 0.0
+        val orientedFix = fix.copy(bearingDegrees = bearing)
+        position = orientedFix
+        val feature = Feature.fromGeometry(Point.fromLngLat(orientedFix.longitude, orientedFix.latitude)).apply {
+            addNumberProperty("bearing", bearing)
+        }
+        style?.getSourceAs<GeoJsonSource>("position")?.setGeoJson(feature)
         if (!centered && map != null) { center(); centered = true }
-        else if (following) map?.easeCamera(CameraUpdateFactory.newLatLng(LatLng(fix.latitude, fix.longitude)), 700)
+        else if (following) map?.easeCamera(CameraUpdateFactory.newLatLng(LatLng(orientedFix.latitude, orientedFix.longitude)), if (mode == "simulation") 100 else 700)
     }
     fun center() { position?.let { map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), 16.0)) } }
     fun setTrace(value: RecordedTrace?) {
@@ -146,17 +158,15 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         val data = trace
         if (data == null) {
             s.getSourceAs<GeoJsonSource>("speed-route")?.setGeoJson(emptyFeatures)
-            s.getSourceAs<GeoJsonSource>("speed-stops")?.setGeoJson(emptyFeatures)
             return
         }
         traceJob = scope.launch {
             val json = withContext(Dispatchers.Default) {
-                TracePresentation.lineGeoJson(data.samples) to TracePresentation.stopGeoJson(data.samples)
+                TracePresentation.lineGeoJson(data.samples)
             }
             ensureActive()
             if (style === s && trace === data) {
-                s.getSourceAs<GeoJsonSource>("speed-route")?.setGeoJson(json.first)
-                s.getSourceAs<GeoJsonSource>("speed-stops")?.setGeoJson(json.second)
+                s.getSourceAs<GeoJsonSource>("speed-route")?.setGeoJson(json)
             }
         }
     }
@@ -194,7 +204,7 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         val request = ++generation
         fogJob?.cancel()
         fogJob = scope.launch {
-            delay(250) // Coalesce location and camera changes; cancellation rejects stale results.
+            delay(if (selectedMode == "simulation") 50 else 250) // Keep up with accelerated playback.
             try {
                 val cells = withContext(Dispatchers.IO) {
                     // The SDK can return unwrapped longitudes such as 179..181.
@@ -219,4 +229,51 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         }
     }
     fun dispose() { fogJob?.cancel(); traceJob?.cancel() }
+
+    /** Tiny overhead pixel drawing of a green Brazilian compact sedan, facing north. */
+    private fun palioPixelArt(): Bitmap {
+        val rows = listOf(
+            "........DDDD........",
+            "......DDDDDDDD......",
+            ".....DDGGGGGGDD.....",
+            "....DGGGYYYYGGGD....",
+            "...DGGGGGGGGGGGGD...",
+            "..DDGGGGGGGGGGGGDD..",
+            ".DDGGGGGGGGGGGGGGDD.",
+            "DDGGGGGGGGGGGGGGGGDD",
+            "DDTTGGGGGGGGGGGGTTDD",
+            "..TTDGGGGGGGGGGDTT..",
+            "....DGGGGGGGGGGD....",
+            "....DWWWWWWWWWWD....",
+            "....DWWWWKKWWWWD....",
+            "....DWWWWKKWWWWD....",
+            "....DWWWWWWWWWWD....",
+            "....DGGGGGGGGGGD....",
+            ".....GGGGgGGGG.....",
+            ".DD.DGGGGGGGGGGD.DD.",
+            "DDGGDGGGGGGGGGGDGGDD",
+            "DDGGDGGGGGGGGGGDGGDD",
+            ".DD.DGGGGGGGGGGD.DD.",
+            "....DGGGGGGGGGGD....",
+            "....DGGGGGGGGGGD....",
+            "....DTTTTTTTTTTD....",
+            "....DTTTTTTTTTTD....",
+            "...DDTTTTTTTTTTDD...",
+            "..DDDDDDSSSSDDDDDD..",
+            "..DDD......DDD..."
+        )
+        val width = rows.maxOf { it.length }
+        val bitmap = Bitmap.createBitmap(width, rows.size, Bitmap.Config.ARGB_8888)
+        val colors = mapOf(
+            'D' to PixelColor.rgb(29, 39, 38), 'G' to PixelColor.rgb(0, 116, 105),
+            'g' to PixelColor.rgb(18, 143, 126), 'Y' to PixelColor.rgb(246, 177, 48),
+            'W' to PixelColor.rgb(122, 192, 199), 'K' to PixelColor.rgb(40, 81, 84),
+            'T' to PixelColor.rgb(19, 28, 28), 'S' to PixelColor.rgb(161, 180, 172)
+        )
+        rows.forEachIndexed { y, row ->
+            val left = (width - row.length) / 2
+            row.forEachIndexed { x, pixel -> bitmap.setPixel(left + x, y, colors[pixel] ?: PixelColor.TRANSPARENT) }
+        }
+        return bitmap
+    }
 }

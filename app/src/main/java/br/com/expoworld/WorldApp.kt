@@ -18,6 +18,6 @@ data class TrackingState(
 
 class WorldApp : Application() {
     val tracking = MutableStateFlow(TrackingState())
-    val database by lazy { Room.databaseBuilder(this, ExplorationDatabase::class.java, "exploration.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3).build() }
+    val database by lazy { Room.databaseBuilder(this, ExplorationDatabase::class.java, "exploration.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build() }
     val repository by lazy { ExplorationRepository(database.cells()) }
 }

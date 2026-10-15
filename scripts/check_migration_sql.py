@@ -12,11 +12,11 @@ from pathlib import Path
 root = Path(__file__).resolve().parent.parent
 schemas = root / "app/schemas/br.com.expoworld.storage.ExplorationDatabase"
 old_schema = json.loads((schemas / "1.json").read_text(encoding="utf-8"))
-new_schema = json.loads((schemas / "3.json").read_text(encoding="utf-8"))
+new_schema = json.loads((schemas / "4.json").read_text(encoding="utf-8"))
 source = (root / "app/src/main/java/br/com/expoworld/storage/ExplorationDatabase.kt").read_text(encoding="utf-8")
 migration = re.findall(r'db\.execSQL\("([^"\n]+)"\)', source)
 queries = re.findall(r'@Query\("([^"\n]+)"\)', source)
-assert len(migration) == 6
+assert len(migration) == 7
 
 def query(prefix):
     return next(q for q in queries if q.startswith(prefix))
@@ -52,13 +52,13 @@ with db:
     db.execute("INSERT INTO route_sessions VALUES ('real', 1000, NULL, 0)")
     db.execute("INSERT INTO route_samples VALUES ('real', 0, 0, 0, 0, 54, 1, -1, 0)")
     db.execute("INSERT INTO route_samples VALUES ('simulation', 0, 0, 0, 0, 0, 1, 0, 10)")
-assert db.execute(query("SELECT * FROM route_sessions"), {"mode": "real"}).fetchone() is None
+assert db.execute(query("SELECT * FROM route_sessions WHERE mode = :mode AND"), {"mode": "real"}).fetchone() is None
 with db:
     db.execute(query("UPDATE route_sessions"), {"mode": "real", "endedAt": 2000})
 db.close()
 
 db = sqlite3.connect(path)
-assert db.execute(query("SELECT * FROM route_sessions"), {"mode": "real"}).fetchone()[3] == 1
+assert db.execute(query("SELECT * FROM route_sessions WHERE mode = :mode AND"), {"mode": "real"}).fetchone()[3] == 1
 assert db.execute(query("SELECT * FROM route_samples"), {"mode": "real"}).fetchone()[5] == 54
 with db:
     db.execute("INSERT INTO route_samples VALUES ('real', 20001, 0, 0, 100, 0, 0, 0, 7)")
@@ -81,4 +81,4 @@ assert db.execute("SELECT COUNT(*) FROM cells WHERE mode = 'real'").fetchone()[0
 assert db.execute(query("SELECT * FROM route_samples"), {"mode": "real"}).fetchall() == []
 assert len(db.execute(query("SELECT * FROM route_samples"), {"mode": "simulation"}).fetchall()) == 1
 db.close()
-print("PASS: migration 1->2->3 matches Room schema, preserves old cell coverage including negative coordinates, survives reopen, isolates modes, trims samples and rolls back atomic writes (host SQLite).")
+print("PASS: migration 1->2->3->4 matches Room schema, preserves old cell coverage including negative coordinates, survives reopen, isolates modes, trims samples and rolls back atomic writes (host SQLite).")

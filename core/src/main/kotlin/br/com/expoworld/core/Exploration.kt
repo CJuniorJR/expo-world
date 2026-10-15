@@ -13,9 +13,8 @@ object ExplorationConfig {
     const val MAX_FIX_AGE_SECONDS = 10.0
     const val MAX_VIEW_CELLS = 60_000
 }
-
 data class Fix(val latitude: Double, val longitude: Double, val accuracy: Double, val monotonicSeconds: Double,
-    val speedMetersPerSecond: Double? = null)
+    val speedMetersPerSecond: Double? = null, val bearingDegrees: Double? = null)
 data class XY(val x: Double, val y: Double)
 data class Cell(val x: Int, val y: Int)
 data class CellBounds(val minX: Int, val maxX: Int, val minY: Int, val maxY: Int)
@@ -33,6 +32,14 @@ object Geo {
         val p = Math.toRadians(a.latitude); val q = Math.toRadians(b.latitude)
         val h = sin((q - p) / 2).pow(2) + cos(p) * cos(q) * sin(Math.toRadians(b.longitude - a.longitude) / 2).pow(2)
         return 2 * R * asin(sqrt(h.coerceIn(0.0, 1.0)))
+    }
+    /** Heading clockwise from north, matching Android Location and MapLibre. */
+    fun bearing(from: Fix, to: Fix): Double {
+        val p1 = Math.toRadians(from.latitude); val p2 = Math.toRadians(to.latitude)
+        val dl = Math.toRadians(to.longitude - from.longitude)
+        val y = sin(dl) * cos(p2)
+        val x = cos(p1) * sin(p2) - sin(p1) * cos(p2) * cos(dl)
+        return (Math.toDegrees(atan2(y, x)) + 360.0) % 360.0
     }
     fun cell(point: XY) = Cell(floor(point.x / ExplorationConfig.CELL_PROJECTED_METERS).toInt(), floor(point.y / ExplorationConfig.CELL_PROJECTED_METERS).toInt())
     fun bounds(south: Double, west: Double, north: Double, east: Double): CellBounds {
@@ -112,27 +119,4 @@ object Revealer {
         }
         return result
     }
-}
-
-object SimulatedRoute {
-    // São Paulo: cruise, deceleration, slow traffic, a stop, then acceleration.
-    private fun speed(second: Int): Double = when {
-        second <= 25 -> 15.0
-        second <= 40 -> 15.0 - (second - 25) * .8
-        second <= 55 -> 3.0
-        second <= 65 -> (3.0 - (second - 55) * .3).coerceAtLeast(0.0)
-        second <= 85 -> 0.0
-        second <= 105 -> (second - 85) * .6
-        else -> 12.0
-    }
-    fun fix(index: Int, time: Double): Fix {
-        val origin = Geo.project(-23.5615, -46.6559)
-        val leg = index.coerceIn(0, LAST_INDEX)
-        val distance = (1..leg).sumOf { speed(it) }
-        val scale = 1 / cos(Math.toRadians(-23.5615))
-        val x = origin.x + distance * .8 * scale
-        val y = origin.y + distance * .6 * scale
-        return Fix(Geo.latitude(y), Geo.longitude(x), 5.0, time, speed(leg))
-    }
-    const val LAST_INDEX = 120
 }

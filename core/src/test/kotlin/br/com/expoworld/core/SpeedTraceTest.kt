@@ -4,6 +4,28 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SpeedTraceTest {
+    @Test fun stoppedTraceIsBlackIncludingStationaryArrivalButNeverAcrossGap() {
+        assertEquals("#000000", TracePresentation.color(0.0))
+        assertEquals("#000000", TracePresentation.color(3.0))
+        assertNotEquals("#000000", TracePresentation.color(4.0))
+        val a = TraceSample(0, 0.0, 0.0, 0.0, 20.0, true, -1, 0.0)
+        val b = a.copy(sequence = 1, longitude = .0001, elapsedSeconds = 5.0, breakBefore = false)
+        val c = b.copy(sequence = 2, elapsedSeconds = 15.0, speedKmh = 0.0, stopId = 0, stopSeconds = 5.0)
+        val json = TracePresentation.lineGeoJson(listOf(a, b, c))
+        assertTrue(json.contains("#000000"))
+        assertFalse(json.contains("Point"))
+        assertFalse(TracePresentation.lineGeoJson(listOf(a, b, c.copy(breakBefore = true))).contains("#000000"))
+    }
+    @Test fun streetSimulationTurnsAndMovesConsistentlyWithItsVirtualClock() {
+        val points = (0..SimulatedRoute.LAST_INDEX).map { SimulatedRoute.fix(it, 100.0 + it) }
+        assertTrue(SimulatedRoute.LAST_INDEX * SimulatedRoute.PLAYBACK_DELAY_MILLIS < 60_000)
+        assertTrue(points.zipWithNext().all { (a, b) -> Geo.distance(a, b) <= b.speedMetersPerSecond!! + .1 })
+        assertTrue(points.zipWithNext().any { (a, b) -> b.longitude > a.longitude })
+        assertTrue(points.zipWithNext().any { (a, b) -> b.longitude < a.longitude })
+        assertEquals(0.0, points.last().speedMetersPerSecond!!, 0.0)
+        val length = points.zipWithNext().sumOf { (a, b) -> Geo.distance(a, b) }
+        assertTrue(length in 2100.0..2250.0)
+    }
     private fun fix(time: Int, x: Double = 0.0, speed: Double? = 0.0, accuracy: Double = 5.0) =
         Fix(0.0, Geo.longitude(x), accuracy, 100.0 + time, speed)
     @Test fun gpsVelocityIsPreferredAndConvertedToKmh() {

@@ -19,10 +19,11 @@ class Simulation(private val app: WorldApp) {
             try {
                 app.repository.clearSimulation()
                 processor.begin()
+                val origin = SystemClock.elapsedRealtimeNanos() / 1e9
                 for (i in 0..SimulatedRoute.LAST_INDEX) {
-                    val now = SystemClock.elapsedRealtimeNanos() / 1e9
+                    val now = origin + i // Isolated virtual clock: 1 GPS second per frame.
                     processor.ingest(SimulatedRoute.fix(i, now), now)
-                    delay(1000)
+                    delay(SimulatedRoute.PLAYBACK_DELAY_MILLIS)
                 }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { app.tracking.update { it.copy(message = "Falha ao salvar simulação. Verifique o espaço livre.") } }

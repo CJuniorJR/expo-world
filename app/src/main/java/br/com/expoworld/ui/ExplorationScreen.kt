@@ -27,6 +27,7 @@ import br.com.expoworld.core.RecordedTrace
 import br.com.expoworld.core.TracePresentation
 import br.com.expoworld.core.ExplorationProgress
 import br.com.expoworld.core.TripSummary
+import br.com.expoworld.storage.SavedRoute
 import java.text.NumberFormat
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +54,13 @@ fun ExplorationScreen(
     traceVisible: Boolean,
     onTraceVisibleChange: (Boolean) -> Unit,
     onTraceFocus: () -> Unit,
+    savedRoutes: List<SavedRoute>,
+    selectedSavedId: String?,
+    onSavedRouteSelect: (String?) -> Unit,
+    canSave: Boolean,
+    saveBusy: Boolean,
+    saveMessage: String,
+    onSaveRoute: (String) -> Unit,
     notificationsHidden: Boolean,
     onSimulationChange: (Boolean) -> Unit,
     onTripToggle: () -> Unit,
@@ -62,6 +70,18 @@ fun ExplorationScreen(
     onGpsSettings: () -> Unit
 ) {
     var menuOpen by rememberSaveable { mutableStateOf(false) }
+    var titleDialog by rememberSaveable { mutableStateOf(false) }
+    var routeTitle by rememberSaveable { mutableStateOf("") }
+    if (titleDialog && canSave) AlertDialog(
+        onDismissRequest = { titleDialog = false },
+        title = { Text("Salvar trajeto") },
+        text = { OutlinedTextField(value = routeTitle, onValueChange = { routeTitle = it.take(80) },
+            label = { Text("Título") }, singleLine = true, supportingText = { Text("${routeTitle.length}/80") }) },
+        confirmButton = { TextButton(enabled = routeTitle.isNotBlank() && !saveBusy, onClick = {
+            onSaveRoute(routeTitle.trim()); titleDialog = false
+        }) { Text("Salvar") } },
+        dismissButton = { TextButton(onClick = { titleDialog = false }) { Text("Cancelar") } }
+    )
     var summary by remember { mutableStateOf<TripSummary?>(null) }
     LaunchedEffect(trace) { summary = trace?.let { data -> withContext(Dispatchers.Default) { TripSummary.from(data) } } }
     val density = LocalDensity.current
@@ -195,6 +215,7 @@ fun ExplorationScreen(
 
             HorizontalDivider(color = Color(0xFF2D414A))
             Text("Rastro por velocidade", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            savedRoutes.firstOrNull { it.id == selectedSavedId }?.let { Text(it.title, color = Mint) }
             when {
                 trace == null || trace.samples.isEmpty() -> Text(if (state.active) "Aguardando a primeira posição precisa para desenhar o rastro ao vivo."
                     else "Inicie um percurso para ver o rastro ao vivo e consulte o resumo ao encerrar.", color = Muted,
@@ -203,7 +224,7 @@ fun ExplorationScreen(
                     if (state.active) Text("Rastro ao vivo. As cores e paradas se atualizam durante o percurso.", color = Mint,
                         style = MaterialTheme.typography.bodySmall)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (state.active) "Rastro visível ao vivo" else "Exibir último percurso", modifier = Modifier.weight(1f))
+                        Text(if (state.active) "Rastro visível ao vivo" else "Exibir percurso", modifier = Modifier.weight(1f))
                         Switch(checked = traceVisible || state.active, onCheckedChange = onTraceVisibleChange, enabled = !state.active)
                     }
                     val currentSummary = summary
@@ -223,26 +244,44 @@ fun ExplorationScreen(
                         color = Muted, style = MaterialTheme.typography.bodySmall)
                     }
                     Box(Modifier.fillMaxWidth().height(12.dp).background(
-                        Brush.horizontalGradient(listOf(Color(0xFF21404A), Color(0xFF759FA0), Color(0xFFC9FFF1))), RoundedCornerShape(6.dp)))
+                        Brush.horizontalGradient(listOf(Color.Black, Color(0xFF759FA0), Color(0xFFC9FFF1))), RoundedCornerShape(6.dp)))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("0 km/h", color = Muted, fontSize = 11.sp)
                         Text("30 km/h", color = Muted, fontSize = 11.sp)
                         Text("60+ km/h", color = Muted, fontSize = 11.sp)
                     }
-                    Text("Escuro: lento ou parado. Claro: mais rápido. Cinza: velocidade não estimada.", color = Muted,
+                    Text("Preto: parado (até 3 km/h). Escuro: lento. Claro: mais rápido. Cinza: velocidade não estimada.", color = Muted,
                         style = MaterialTheme.typography.bodySmall)
                     val stoppedSeconds = currentSummary?.stoppedSeconds?.toInt() ?: 0
                     Text("${currentSummary?.stops ?: 0} paradas detectadas • ${stoppedSeconds / 60} min ${stoppedSeconds % 60} s",
                         color = Mint, style = MaterialTheme.typography.labelLarge)
-                    Text("Os círculos marcam pelo menos 5 segundos a até 3 km/h. A velocidade não confirma congestionamento.",
+                    Text("Paradas de pelo menos 5 segundos entram no resumo. O rastro fica preto, sem círculos. A velocidade não confirma congestionamento.",
                         color = Muted, style = MaterialTheme.typography.bodySmall)
                     OutlinedButton(onClick = { onTraceVisibleChange(true); onTraceFocus(); menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
                         Text("Enquadrar percurso")
                     }
                 }
             }
-            Text("Mantemos somente o último percurso de cada modo; começar outro substitui o rastro anterior.", color = Muted,
+            Text("Salve o percurso real antes de começar outro para mantê-lo na sua lista.", color = Muted,
                 style = MaterialTheme.typography.bodySmall)
+            if (!simulatedView) {
+                if (canSave) Button(enabled = !saveBusy, onClick = { routeTitle = ""; titleDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (saveBusy) "Salvando…" else "Salvar trajeto com título")
+                }
+                if (saveMessage.isNotEmpty()) Text(saveMessage, color = Mint)
+                Text("Trajetos salvos", style = MaterialTheme.typography.titleMedium)
+                if (savedRoutes.isEmpty()) Text("Seus trajetos reais salvos aparecerão aqui.", color = Muted)
+                if (selectedSavedId != null) OutlinedButton(onClick = { onSavedRouteSelect(null) }) { Text("Voltar ao último percurso") }
+                savedRoutes.forEach { saved ->
+                    OutlinedButton(enabled = !state.active, onClick = { onSavedRouteSelect(saved.id); menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.fillMaxWidth()) {
+                            Text(saved.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+                                .format(java.util.Date(saved.startedAtMillis)), style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
 
             if (mapStatus.isNotEmpty()) {
                 Text("Mapa", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -275,7 +314,7 @@ fun ExplorationScreen(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f).padding(end = 12.dp)) {
                         Text("Trajeto simulado", style = MaterialTheme.typography.titleMedium)
-                        Text("Teste a revelação sem sair de casa", color = Muted, style = MaterialTheme.typography.bodySmall)
+                        Text("Ruas de São Paulo • reprodução 8× • velocidades e paradas variadas", color = Muted, style = MaterialTheme.typography.bodySmall)
                     }
                     Switch(checked = simulatedView, onCheckedChange = onSimulationChange, enabled = !state.active)
                 }
