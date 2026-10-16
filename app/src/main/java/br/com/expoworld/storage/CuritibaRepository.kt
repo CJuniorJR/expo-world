@@ -12,6 +12,9 @@ import org.locationtech.jts.geom.*
 class CuritibaRepository(private val dao: ExplorationDao, assets: AssetManager) {
     private val loaderScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val catalog = loaderScope.async { load(assets) }
+    suspend fun planningNetwork(): CityNetwork? = withContext(Dispatchers.Default) {
+        try { catalog.await() } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+    }
     suspend fun neighborhoodAt(fix: Fix?): String? = withContext(Dispatchers.Default) {
         try { catalog.await().neighborhoodAt(fix) }
         catch (e: CancellationException) { throw e }

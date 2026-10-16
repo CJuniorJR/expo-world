@@ -30,6 +30,8 @@ class PocketExplorationTest {
     @Test fun explorationRewardsNewCoverageWhileStrollPenalizesTooManyTurns() {
         val p = path()
         assertTrue(PocketPlanning.score(request(),p,1500.0) > PocketPlanning.score(request(),p,10.0))
+        val shortAllNew = path(seconds = 900.0).copy(distanceMeters = 1000.0)
+        assertTrue(PocketPlanning.score(request(),p,1500.0) > PocketPlanning.score(request(),shortAllNew,950.0))
         val stroll = request(PocketPurpose.STROLL)
         assertTrue(PocketPlanning.score(stroll,p,null) > PocketPlanning.score(stroll,path(steps = 20),null))
         assertEquals(PocketPlanning.score(stroll,p,null),PocketPlanning.score(stroll,p,1900.0),0.0)

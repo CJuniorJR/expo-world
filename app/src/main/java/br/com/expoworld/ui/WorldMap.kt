@@ -31,6 +31,8 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
     private var fogJob: Job? = null
     private var mode = "real"
     private var position: Fix? = null
+    private var pocketPlan: PocketPlan? = null
+    private var pickStart: ((PocketPoint) -> Unit)? = null
     private var accuracyFix: Fix? = null
     private var centered = false
     private var generation = 0
@@ -72,6 +74,14 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         view.addOnDidFailLoadingMapListener { loadFailure = true; publishMessage() }
         view.getMapAsync { loaded ->
             map = loaded
+            loaded.addOnMapClickListener { point ->
+                val callback=pickStart
+                if(callback!=null){
+                    val picked=runCatching{PocketPoint(point.latitude,point.longitude)}.getOrNull()
+                    if(picked!=null){pickStart=null;message("");callback(picked)}else message("Escolha uma partida entre as latitudes -85° e 85°.")
+                    true
+                }else false
+            }
             applyInsets()
             loaded.setMinZoomPreference(2.0)
             loaded.setMaxZoomPreference(20.0)
@@ -148,6 +158,9 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
             s.addLayer(FillLayer("comparison-fill", "comparison").withProperties(fillColor("#101820"), fillOpacity(fogOpacity)))
             s.addSource(GeoJsonSource("epochs", emptyFeatures))
             s.addLayer(FillLayer("epochs-fill", "epochs").withProperties(fillColor(Expression.get("color")), fillOpacity(.45f)))
+            s.addSource(GeoJsonSource("pocket-route", PocketPlanning.geoJson(pocketPlan)))
+            s.addLayer(LineLayer("pocket-outline","pocket-route").withProperties(lineColor("#FFFFFF"),lineWidth(7f),lineOpacity(.8f)))
+            s.addLayer(LineLayer("pocket-line","pocket-route").withProperties(lineColor(ExplorerTheme.hex(theme.accent)),lineWidth(4f),lineDasharray(arrayOf(2f,1f))))
             s.addSource(GeoJsonSource("speed-route", emptyFeatures))
             s.addLayer(LineLayer("speed-route-outline", "speed-route").withProperties(lineColor(if (theme.light) "#354555" else "#102027"), lineWidth(10f),
                 lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
@@ -165,6 +178,7 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
             s.addLayer(LineLayer("accuracy-border", "accuracy").withProperties(lineColor("#69ABFF"), lineWidth(1.5f)))
             s.addSource(GeoJsonSource("replay-head", emptyFeatures))
             s.addLayer(CircleLayer("replay-dot", "replay-head").withProperties(circleColor("#FFD166"), circleRadius(8f), circleStrokeColor("#FFFFFF"), circleStrokeWidth(2f)))
+            s.getLayerAs<LineLayer>("pocket-line")?.setProperties(lineColor(ExplorerTheme.hex(theme.accent)))
             s.addImage("palio-green", palioPixelArt())
             s.addImage("walker-green", activityPixelArt(ActivityKind.WALK))
             s.addImage("bike-green", activityPixelArt(ActivityKind.BIKE))
@@ -217,9 +231,22 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         style?.getSourceAs<GeoJsonSource>("accuracy")?.setGeoJson(AccuracyGeometry.geoJson(fix))
     }
     fun center() { position?.let { map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), 16.0)) } }
+    fun choosePocketStart(callback: (PocketPoint)->Unit) {
+        pickStart=callback;setFollowing(false);message("Toque no mapa para escolher a partida do roteiro.")
+    }
+    fun cancelPocketPick(){pickStart=null;publishMessage()}
+    fun setPocket(plan: PocketPlan?) {
+        pocketPlan=plan;style?.getSourceAs<GeoJsonSource>("pocket-route")?.setGeoJson(PocketPlanning.geoJson(plan))
+    }
+    fun focusPocket(plan: PocketPlan) {
+        setPocket(plan);setFollowing(false)
+        val bounds=LatLngBounds.Builder().includes(plan.path.points.map{LatLng(it.latitude,it.longitude)}).build()
+        map?.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds,(density*50).toInt()))
+    }
     fun setTheme(value: ExplorerTheme) {
         theme = value
         style?.let { s ->
+            s.getLayerAs<LineLayer>("pocket-line")?.setProperties(lineColor(ExplorerTheme.hex(theme.accent)))
             s.addImage("palio-green", palioPixelArt())
             s.addImage("walker-green", activityPixelArt(ActivityKind.WALK))
             s.addImage("bike-green", activityPixelArt(ActivityKind.BIKE))

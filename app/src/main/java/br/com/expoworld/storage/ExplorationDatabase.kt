@@ -54,6 +54,9 @@ data class SavedRoute(@PrimaryKey val id: String, val title: String, val started
     indices = [Index(value = ["mode", "activity", "dataset", "neighborhoodId"])])
 data class StreetVisit(val mode: String, val activity: String, val dataset: String, val streetId: String,
     val bin: Int, val neighborhoodId: String, val meters: Double)
+@Entity(tableName = "planned_routes")
+data class PlannedRouteRow(@PrimaryKey val id: String, val title: String, val createdAtMillis: Long, val payload: String)
+
 data class NeighborhoodMeters(val neighborhoodId: String, val meters: Double)
 
 private fun RouteSampleRow.toDomain() = TraceSample(sequence, latitude, longitude, elapsedSeconds, speedKmh, breakBefore, stopId, stopSeconds)
@@ -62,6 +65,15 @@ private fun TraceSample.toRow(mode: String) = RouteSampleRow(mode, sequence, lat
 
 @Dao
 interface ExplorationDao {
+    @Query("SELECT * FROM planned_routes ORDER BY createdAtMillis DESC")
+    fun plannedRoutes(): Flow<List<PlannedRouteRow>>
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun putPlannedRoute(route: PlannedRouteRow)
+    @Query("DELETE FROM planned_routes WHERE id = :id")
+    suspend fun deletePlannedRoute(id: String)
+    @Query("SELECT * FROM street_visits WHERE mode = 'real' AND dataset = :dataset")
+    suspend fun realStreetVisits(dataset: String): List<StreetVisit>
+
     @Query("SELECT * FROM cells WHERE mode = 'real' AND (y > :afterY OR (y = :afterY AND x > :afterX)) ORDER BY y, x LIMIT 1024")
     suspend fun exportPage(afterY: Int, afterX: Int): List<ExploredCell>
     @Query("SELECT MIN(x) AS minX, MAX(x) AS maxX, MIN(y) AS minY, MAX(y) AS maxY FROM cells WHERE mode = :mode")
@@ -166,7 +178,7 @@ interface ExplorationDao {
     }
 }
 
-@Database(entities = [ExploredCell::class, TripCell::class, RouteSession::class, RouteSampleRow::class, SavedRoute::class, StreetVisit::class], version = 7, exportSchema = true)
+@Database(entities = [ExploredCell::class, TripCell::class, RouteSession::class, RouteSampleRow::class, SavedRoute::class, StreetVisit::class, PlannedRouteRow::class], version = 8, exportSchema = true)
 abstract class ExplorationDatabase : RoomDatabase() { abstract fun cells(): ExplorationDao }
 
 

@@ -32,5 +32,6 @@ class WorldApp : Application() {
     }
     val database by lazy { Room.databaseBuilder(this, ExplorationDatabase::class.java, "exploration.db").addMigrations(*ALL_MIGRATIONS).build() }
     val repository by lazy { ExplorationRepository(database.cells()) }
+    val pocket by lazy { PocketPlanner(this) }
     val city by lazy { CuritibaRepository(database.cells(), assets) }
 }

@@ -28,5 +28,10 @@ private fun unifySchema(db: SupportSQLiteDatabase) {
 private fun unifiedMigration(start: Int) = object : Migration(start, 7) {
     override fun migrate(db: SupportSQLiteDatabase) = unifySchema(db)
 }
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS planned_routes (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, createdAtMillis INTEGER NOT NULL, payload TEXT NOT NULL)")
+    }
+}
 val ALL_MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3,
-    unifiedMigration(3), unifiedMigration(4), unifiedMigration(5), unifiedMigration(6))
+    unifiedMigration(3), unifiedMigration(4), unifiedMigration(5), unifiedMigration(6), MIGRATION_7_8)

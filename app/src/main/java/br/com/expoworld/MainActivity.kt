@@ -53,6 +53,7 @@ class MainActivity : ComponentActivity() {
     private val dialog = mutableStateOf("")
     private val permissionVersion = mutableIntStateOf(0)
     private var pendingStart = false
+    private var pendingPocketStart = false
     private val storageBusy = mutableStateOf(false)
     private val storageMessage = mutableStateOf("")
     private fun exportMedia(uri: android.net.Uri, animated: Boolean) {
@@ -158,7 +159,7 @@ class MainActivity : ComponentActivity() {
         pendingStart = false
         if (app.tracking.value.active) return
         if (!fineGranted()) { requestLocation(true); return }
-        runCatching { ContextCompat.startForegroundService(this, Intent(this, ExplorationService::class.java).putExtra("activity", app.tracking.value.activity.key)) }
+        runCatching { ContextCompat.startForegroundService(this, Intent(this, ExplorationService::class.java).putExtra("activity", app.tracking.value.activity.key).putExtra("pocket",pendingPocketStart)) }
             .onFailure { app.tracking.update { it.copy(message = "Não foi possível iniciar. Mantenha o app aberto e confira as permissões.") } }
     }
     private fun stopTrip() {
@@ -178,6 +179,16 @@ class MainActivity : ComponentActivity() {
     }
     @Composable private fun Screen() {
         val state by app.tracking.collectAsStateWithLifecycle()
+        val pocket by app.pocket.state.collectAsStateWithLifecycle()
+        var pocketOpen by rememberSaveable { mutableStateOf(false) }
+        var pickingPocketStart by remember { mutableStateOf(false) }
+        var chosenLat by rememberSaveable { mutableStateOf<Double?>(null) }
+        var chosenLon by rememberSaveable { mutableStateOf<Double?>(null) }
+        val pocketScope=rememberCoroutineScope()
+        val realPosition=state.position?.takeIf { !state.simulated && it.accuracy<=50 && SystemClock.elapsedRealtimeNanos()/1e9-it.monotonicSeconds in 0.0..30.0 }
+        val pocketProgress=remember(pocket.plan?.id,state.active) { br.com.expoworld.core.PocketProgress() }
+        val nextPocketStep=remember(pocket.plan,state.position,state.active) { pocket.plan?.let{plan->realPosition?.let{p->pocketProgress.next(plan,br.com.expoworld.core.PocketPoint(p.latitude,p.longitude))}} }
+
         val now by produceState(SystemClock.elapsedRealtimeNanos() / 1e9) {
             while (true) { value = SystemClock.elapsedRealtimeNanos() / 1e9; delay(2000) }
         }
@@ -188,6 +199,7 @@ class MainActivity : ComponentActivity() {
         var cardTitle by rememberSaveable { mutableStateOf(preferences.getString("cardTitle", "Minha expedição") ?: "Minha expedição") }
         var fogOpacity by remember { mutableFloatStateOf(preferences.getFloat("fogOpacity", .55f).coerceIn(.2f, .8f)) }
         val viewMode = if (state.active) { if (state.simulated) "simulation" else "real" } else if (simulatedView) "simulation" else "real"
+        LaunchedEffect(pocket.plan,viewMode) { worldMap.setPocket(pocket.plan.takeIf { viewMode == "real" }) }
         val progressFlow = remember(viewMode) { app.repository.progress(viewMode) }
         val progressValue by progressFlow.collectAsStateWithLifecycle(ExplorationProgress(mode = viewMode))
         val progress = progressValue.takeIf { it.mode == viewMode } ?: ExplorationProgress(mode = viewMode)
@@ -252,6 +264,12 @@ class MainActivity : ComponentActivity() {
         ExplorationScreen(
             worldMap = worldMap,
             onThemeChange = { app.selectTheme(it) },
+            onPocketOpen = { worldMap.cancelPocketPick();pickingPocketStart=false;pocketOpen=true },
+            pocket = pocket,
+            pocketInstruction = nextPocketStep?.instruction,
+            onPocketReturn = { realPosition?.let{app.pocket.returnNow(pocketScope,br.com.expoworld.core.PocketPoint(it.latitude,it.longitude))} },
+            canPocketReturn = realPosition!=null && !state.simulated,
+
             state = state,
             simulatedView = viewMode == "simulation",
             progress = progress,
@@ -317,7 +335,7 @@ class MainActivity : ComponentActivity() {
                 if (app.storageBusy) Unit
                 else if (state.active) stopTrip()
                 else if (viewMode == "simulation") simulation.start(lifecycleScope, SimulationScenario.entries[scenarioIndex])
-                else prepareStart()
+                else { pendingPocketStart=false;prepareStart() }
             },
             onCenter = { if (!precise && viewMode == "real") requestLocation(false) else {
                 worldMap.center(); if (state.active) worldMap.setFollowing(true)
@@ -326,6 +344,15 @@ class MainActivity : ComponentActivity() {
             onAppSettings = { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:$packageName".toUri())) },
             onGpsSettings = { startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }
         )
+        if(pickingPocketStart) AlertDialog(onDismissRequest={pickingPocketStart=false;worldMap.cancelPocketPick()},
+            title={Text("Escolher partida")},text={Text("Feche este aviso, mova o mapa e toque no ponto de partida desejado.")},
+            confirmButton={TextButton(onClick={pickingPocketStart=false}){Text("Escolher no mapa")}})
+        if(pocketOpen) br.com.expoworld.ui.PocketPlannerDialog(app,worldMap,state,realPosition,
+            chosenLat?.let{lat->chosenLon?.let{lon->br.com.expoworld.core.PocketPoint(lat,lon)}},
+            onUsePosition={chosenLat=null;chosenLon=null},
+            onPickStart={pocketOpen=false;pickingPocketStart=true;worldMap.choosePocketStart{point->chosenLat=point.latitude;chosenLon=point.longitude;pocketOpen=true}},
+            onStart={plan->app.pocket.select(plan);app.tracking.update{it.copy(activity=plan.request.activity)};pendingPocketStart=true;prepareStart()},
+            onLocation={requestLocation(false)},onDismiss={pocketOpen=false})
         if (currentDialog.isNotEmpty()) AlertDialog(
             onDismissRequest = { dialog.value = ""; pendingStart = false },
             title = { Text(when (currentDialog) { "location" -> "Localização precisa"; "gps" -> "Ative o GPS"; else -> "Notificação da viagem" }) },

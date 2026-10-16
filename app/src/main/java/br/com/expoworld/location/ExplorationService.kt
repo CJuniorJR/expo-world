@@ -69,6 +69,7 @@ class ExplorationService : Service(), LocationListener {
         }
         try {
             ServiceCompat.startForeground(this, 1, notification(), if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0)
+            if(intent?.getBooleanExtra("pocket",false)==true) app.pocket.begin() else app.pocket.end()
             started = true
             lastValid = now()
             app.tracking.update { it.copy(active = true, paused = false, simulated = false, position = null, gpsFix = null, liveHead = null, message = "Aguardando sinal GPS preciso…") }
@@ -150,6 +151,7 @@ class ExplorationService : Service(), LocationListener {
     }
     private fun updateNotification() { getSystemService(NotificationManager::class.java).notify(1, notification()) }
     private fun finishTrip() {
+        app.pocket.end()
         if (stopping) return
         stopping = true
         runCatching { manager.removeUpdates(this) }

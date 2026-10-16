@@ -1,3 +1,26 @@
+# Validação — 16/10/2026 — 0.6.0 — Exploração de bolso
+
+- Implementados planejamento por tempo (10–180 min), Explorar/Passear, perfis caminhada/bicicleta/carro, partida GPS ou toque no mapa, circuitos com retorno incluído e roteiros abertos. Compara até três candidatos e tenta um ajuste de duração. Explorar favorece mais quilômetros novos estimados; Passear favorece duração, continuidade e menos mudanças de direção, com opções de custo para menos subidas/rodovias.
+- Prévia tracejada independente do rastro real, orientações em português, início perto da partida com o GPS/serviço existentes e retorno sob demanda à **origem original**, mesmo após vários recálculos. Roteiro anterior conservado em falha/cancelamento. Consulta de retorno disponível também na prévia de um roteiro salvo, antes de iniciar gravação. Sem voz, recálculo automático ou promessa de tempo exato.
+- Roteiros planejados nomeados e separados dos trajetos realizados, com reabertura/exclusão e atualização local da estimativa de descoberta ao reutilizar. Salvar/abrir/gerar não concede créditos. Banco 7→8 cria somente planned_routes; todas as variantes antigas mantêm o caminho de atualização.
+- O usuário autorizou explicitamente o envio da partida e pontos sugeridos ao Valhalla/FOSSGIS após a revisão automática pedir autorização. Uso identificado na interface e README. Nenhum histórico de GPS, créditos ou névoa é enviado. Chamadas serializadas, 1,2 s entre inícios, máximo quatro por geração, HTTPS sem seguir redirecionamentos, resposta até 2 MB. Endpoint público apenas em debug para testes pessoais; release precisa configurar serviço autorizado.
+
+## Verificações
+
+- **77 testes JVM aprovados**, zero falhas/erros. Seis testes novos cobrem circuitos/rotas abertas nos três modos, variação de opção, orçamento com retorno, rejeição de duração/partida inadequadas, priorização de quilômetros novos e poucas curvas, decoder polyline6 com limites/entrada corrompida, progresso sem pular direto à chegada em circuito e validação de coordenadas/tempo.
+- `:core:test :app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest`: **BUILD SUCCESSFUL**. Lint: 0 erros, 34 avisos. **12 testes instrumentados compilados, não executados**, pois adb não mostra aparelho. Os dois novos verificam os três perfis com fixtures públicas e persistência/exclusão de roteiro sem conceder exploração.
+- Três chamadas reais e espaçadas ao servidor autorizado, com coordenadas públicas fixas do centro de Curitiba: pedestrian, bicycle, auto. Todas retornaram três pernas conectadas e pt-BR. Resultados: 2,673 km/1985,301 s (pé); 3,285 km/1000,968 s (bike); 4,866 km/915,974 s (carro). São verificações da API com um circuito público, **não execução completa da interface Android**. Respostas preservadas em assets de testes com atribuição OSM/Valhalla.
+- `scripts/check_migration_sql.py`: nove variantes históricas normalizadas e comparadas ao schema Room 8; dados/índices/defaults preservados; gravar roteiro não altera células, sessões, amostras nem créditos. Verificação em SQLite do computador, sem substituir teste Room no aparelho.
+- `scripts/check_curitiba_data.py`, `scripts/check_apk_assets.py` e `git diff --check`: aprovados. A base de 75 bairros permanece inalterada e os nomes/bytes foram conferidos no APK.
+
+APK: `dist/expo-world-0.6.0-debug.apk`, versionCode 15, 65341133 bytes. SHA-256: `501DF1CC46B61E0B21789E99143A5A9607034315A71C84376EAFA1E89A326A95`.
+
+Entrega diretamente na main conforme pedido: primeira etapa enviada em `5689cd2`; integração completa registrada no commit deste relatório. Chave e configuração locais, caches e APK fora dos commits.
+
+Pendentes no aparelho: aparência, escolha de origem no mapa, geração completa e ajuste de duração, início/gravação real, orientações, retorno repetido, cancelar/repetir consulta, reutilização, atualização com dados existentes e comportamento sem rede. Estimativas sujeitas aos dados OSM, precisão do GPS e disponibilidade do demo; roteiro salvo não garante condições atuais das vias. O backup de células não inclui roteiros planejados.
+
+---
+
 # Validação — 16/10/2026 — versão unificada 0.5.1
 
 ## Integração e regressões

@@ -17,11 +17,12 @@ android {
         applicationId = "br.com.expoworld"
         minSdk = 23
         targetSdk = 36
-        versionCode = 14
-        versionName = "0.5.1"
+        versionCode = 15
+        versionName = "0.6.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "MAPTILER_KEY", quoted(local.getProperty("MAPTILER_KEY", "")))
         buildConfigField("String", "MAP_STYLE_URL", quoted(local.getProperty("MAP_STYLE_URL", "")))
+        buildConfigField("String", "ROUTING_URL", quoted(local.getProperty("ROUTING_URL", "")))
     }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }

@@ -1,6 +1,6 @@
 # Expo World — MVP Android
 
-Aplicativo nativo em Kotlin/Jetpack Compose que revela uma faixa ao redor do caminho percorrido. MapLibre Native exibe o mapa; Room preserva a exploração e o rastro por velocidade do último percurso. Interface em português do Brasil. Sem login, backend, sincronização, anúncios ou navegação. Trajetos reais podem ser salvos localmente com título e consultados depois.
+Aplicativo nativo em Kotlin/Jetpack Compose que revela uma faixa ao redor do caminho percorrido. MapLibre Native exibe o mapa; Room preserva a exploração e o rastro por velocidade do último percurso. Interface em português do Brasil. Sem login, backend próprio, sincronização ou anúncios. Planejamento online de roteiros com orientações em texto, sem navegação por voz. Trajetos reais podem ser salvos localmente com título e consultados depois.
 
 ## Versão unificada 0.5.1 — 16/10/2026
 
@@ -22,7 +22,7 @@ Sem chave/URL de estilo, há um fundo neutro com orientação clara. Ele permite
 python scripts/check_migration_sql.py
 ```
 
-O APK, quando compilado, fica em `app/build/outputs/apk/debug/app-debug.apk`. A entrega atual também está em `dist/expo-world-0.5.1-debug.apk`. O teste conectado exige um Android conectado por ADB ou emulador iniciado. A verificação Python usa a biblioteca padrão para testar o SQL das migrações em SQLite do computador, sem substituir o teste Room no Android. Relatórios: `core/build/reports/tests/test/index.html` e `app/build/reports/lint-results-debug.html`.
+O APK, quando compilado, fica em `app/build/outputs/apk/debug/app-debug.apk`. A entrega atual também está em `dist/expo-world-0.6.0-debug.apk`. O teste conectado exige um Android conectado por ADB ou emulador iniciado. A verificação Python usa a biblioteca padrão para testar o SQL das migrações em SQLite do computador, sem substituir o teste Room no Android. Relatórios: `core/build/reports/tests/test/index.html` e `app/build/reports/lint-results-debug.html`.
 
 `scripts/bootstrap-build.ps1` pode baixar JDK 17 em `.tools` e executar a compilação, sem alterar a instalação de Java do sistema. `-InstallAndroidSdk` também instala ferramentas Android locais e apresenta as licenças do SDK para revisão/aceitação. O script precisa de acesso à internet; downloads e caches não são versionados. Se já tiver SDK instalado, defina `ANDROID_HOME` ou `sdk.dir`. A primeira execução baixa o Gradle e as dependências.
 
@@ -33,6 +33,28 @@ Na versão 0.5.1 o mapa ocupa a tela inteira, com controles flutuantes e névoa 
 Ao iniciar, o mapa acompanha a posição com transições de câmera. Mover ou girar o mapa com os dedos pausa esse acompanhamento; a mira retoma-o. O menu oferece **Acompanhar minha posição**. Isso só movimenta a câmera: não fornece navegação nem instruções de direção.
 
 O aviso **Sem internet** distingue a conexão do sinal GPS. O registro local continua, e o app tenta recarregar o estilo após a conexão voltar caso seu carregamento tenha falhado. A leitura do estado de rede usa uma permissão normal (`ACCESS_NETWORK_STATE`), sem novo diálogo de permissão e sem enviar dados da exploração.
+
+## Exploração de bolso — 0.6.0
+
+Menu → **Exploração de bolso • planejar uma volta**. Escolha de 10 a 180 minutos (atalhos 15/30/45/60), caminhada/bicicleta/carro e **Explorar** ou **Passear**. A partida pode ser a posição GPS recente ou um ponto tocado no mapa. **Voltar ao início** vem marcado: a ida e a volta entram no orçamento de tempo; desmarcar permite terminar em outro lugar.
+
+**Explorar** compara até três percursos e favorece quilômetros únicos ainda não reconhecidos na base de Curitiba. A escolha de pontos intermediários também favorece ruas com partes ainda não visitadas. O reconhecimento/estimativa ocorre no aparelho; não envia créditos, névoa ou histórico ao roteador. Fora da área coberta, ainda há planejamento, com indicação de que a estimativa de descoberta está indisponível. **Passear** dá mais peso à duração, continuidade, menor repetição e menos mudanças de direção. As opções do roteador reduzem preferência por subidas a pé/bike e por rodovias/pedágios no carro; não garantem percurso plano, agradável, seguro ou sem pedágios.
+
+A duração é uma estimativa do roteador, sem trânsito em tempo real, ajustada com uma quarta consulta quando necessário. Aceitamos opções entre 45% e 110% do tempo informado e mostramos a duração real estimada antes de iniciar; pode não haver solução adequada para uma duração/local. Nenhuma distância em linha reta é apresentada como percurso viário. **Gerar outra opção** varia os pontos sugeridos. Falha/cancelamento conserva o roteiro anterior.
+
+O roteiro aparece como **linha tracejada** acima da névoa, com distância, tempo, estimativa de trechos novos e orientações em texto. **Ver no mapa** enquadra a prévia. **Iniciar este percurso** exige GPS recente e posição a até 150 m da partida, seleciona a atividade correta e usa o serviço de registro existente. A linha efetivamente percorrida continua com cores por velocidade e paradas pretas. Planejar, salvar ou reabrir não concede exploração. **Passear** também revela áreas novas quando de fato percorridas. Não há voz, navegação completa, recálculo automático ou garantia de precisão/atualização das instruções.
+
+Durante o percurso, **Voltar ao início agora** calcula um novo caminho da posição GPS recente para a partida original, usando o perfil da atividade; mantém essa partida mesmo após mais de um recálculo. O caminho anterior é mantido se a consulta falhar. Estando a até 60 m da origem, informa que você já está perto e evita consultar o servidor. O início do retorno não precisa reproduzir o caminho da ida ao contrário.
+
+**Salvar roteiro planejado** grava título, geometria, atividade, objetivo, origem, orçamento, estimativas e orientações no aparelho. A lista é separada de **Trajetos realizados salvos**. Ao reabrir um roteiro, a estimativa de trechos novos é recalculada localmente com os créditos atuais. É possível removê-lo da prévia ou excluir uma cópia salva; isso não apaga a exploração. O banco **7→8** acrescenta somente `planned_routes` e preserva as migrações anteriores. O roteiro atual é recuperado das preferências após reabrir o app; a gravação não reinicia automaticamente. A simulação não usa nem altera roteiros reais.
+
+### Serviço de percursos e privacidade
+
+O usuário autorizou nesta sessão o envio da partida e dos pontos intermediários ao **Valhalla/FOSSGIS** (`https://valhalla1.openstreetmap.de`) para gerar percursos e recalcular retorno. A interface identifica esse envio. Não há envio periódico de GPS. O endpoint é usado somente no **debug para testes pessoais**, com `User-Agent`/`X-Client-Id`, chamadas sequenciais espaçadas no mínimo 1,2 s, resposta limitada a 2 MB e no máximo quatro consultas por geração. Acesso HTTPS, sem seguir redirecionamentos. Dados de exploração continuam locais; mapas e cálculo de novos roteiros precisam de internet.
+
+Para **release/distribuição**, configure `ROUTING_URL` em `local.properties` para uma instância Valhalla própria ou serviço autorizado (base HTTPS, sem `/route`). Release sem configuração bloqueia o planejamento. O servidor público é uma demonstração de uso justo, não infraestrutura irrestrita de produção; seus mantenedores pedem contato antes de publicar aplicativos que o utilizem. [Condições do demo e identificação](https://github.com/valhalla/valhalla#demo-server), [perfis, opções, instruções e formato da API](https://valhalla.github.io/valhalla/api/route/api-reference/). Regras conferidas em 16/10/2026. Não foi enviado pedido aos mantenedores ou publicado aplicativo nesse serviço.
+
+Verificação manual: gere uma caminhada com retorno e uma sem retorno; escolha partida no mapa; compare Explorar/Passear; salve/reabra um roteiro; inicie perto da partida; confira orientações e recálculo para a origem; interrompa a internet e confirme que roteiro anterior e gravação GPS permanecem; atualize sem desinstalar e confira os dados anteriores. O backup de células continua sem incluir roteiros planejados.
 
 ## Temas
 

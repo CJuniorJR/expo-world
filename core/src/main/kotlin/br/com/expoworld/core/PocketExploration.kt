@@ -50,7 +50,8 @@ object PocketPlanning {
             val x = minOf(a.longitude,b.longitude); val y = minOf(a.latitude,b.latitude)
             (x * 10_000).roundToInt() to (y * 10_000).roundToInt()
         }.toSet().size.toDouble() / (path.points.size - 1)
-        val novelty = ((freshMeters ?: 0.0) / path.distanceMeters).coerceIn(0.0,1.0)
+        // Favor more new kilometers within the same time budget, not merely a high new/total percentage on a short route.
+        val novelty = ((freshMeters ?: 0.0) / (request.budgetSeconds * request.planningSpeed / 3.6)).coerceIn(0.0,1.0)
         return if (request.purpose == PocketPurpose.EXPLORE) novelty * 3 + timeFit + unique * .3
             else timeFit + unique * .5 - path.steps.size / (path.distanceMeters / 1000).coerceAtLeast(1.0) * .01
     }

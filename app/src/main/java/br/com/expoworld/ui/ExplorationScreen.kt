@@ -67,6 +67,11 @@ private val Track: Color @Composable get() = themeColor(LocalExplorerTheme.curre
 fun ExplorationScreen(
     worldMap: WorldMap,
     onThemeChange: (ExplorerTheme) -> Unit,
+    onPocketOpen: () -> Unit,
+    pocket: br.com.expoworld.storage.PocketState,
+    pocketInstruction: String?,
+    onPocketReturn: () -> Unit,
+    canPocketReturn: Boolean,
     state: TrackingState,
     simulatedView: Boolean,
     progress: ExplorationProgress,
@@ -313,6 +318,14 @@ fun ExplorationScreen(
                         Icon(painterResource(R.drawable.ic_center), if (following) "Acompanhando minha posição" else "Centralizar na minha posição", modifier = Modifier.size(24.dp))
                     }
                 }
+                if(pocket.plan!=null && pocket.active && state.active && !simulatedView) Surface(color=Ink,contentColor=Paper,shape=RoundedCornerShape(14.dp)){
+                    Column(Modifier.fillMaxWidth().padding(12.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
+                        Text(if(pocket.plan.returning)"Retorno ao início" else "${pocket.plan.request.purpose.label} • roteiro planejado",color=Mint,style=MaterialTheme.typography.labelLarge)
+                        pocketInstruction?.let{Text("A seguir: $it",maxLines=2,overflow=TextOverflow.Ellipsis,style=MaterialTheme.typography.bodySmall)}
+                        if(pocket.message.isNotBlank())Text(pocket.message,maxLines=2,style=MaterialTheme.typography.bodySmall)
+                        OutlinedButton(enabled=canPocketReturn && !pocket.busy,onClick=onPocketReturn,modifier=Modifier.fillMaxWidth()){Text(if(pocket.busy)"Calculando volta…" else "Voltar ao início agora")}
+                    }
+                }
                 // Attribution stays visible even with the information menu closed.
                 Text("© MapTiler  ·  © OpenStreetMap contributors", color = Color(0xFFE0E7E9), fontSize = 10.sp)
             }
@@ -338,6 +351,8 @@ fun ExplorationScreen(
                     Icon(painterResource(R.drawable.ic_close), "Fechar menu")
                 }
             }
+            OutlinedButton(onClick={menuOpen=false;onPocketOpen()},enabled=!simulatedView && !storageBusy,modifier=Modifier.fillMaxWidth()){Text("Exploração de bolso • planejar uma volta")}
+            if(simulatedView)Text("Volte ao modo real para planejar roteiros.",style=MaterialTheme.typography.bodySmall)
             ThemePicker(onThemeChange)
             Text("Atividade", style = MaterialTheme.typography.titleMedium)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -461,7 +476,7 @@ fun ExplorationScreen(
                     Text(if (saveBusy) "Salvando…" else "Salvar trajeto com título")
                 }
                 if (saveMessage.isNotEmpty()) Text(saveMessage, color = Mint)
-                Text("Trajetos salvos", style = MaterialTheme.typography.titleMedium)
+                Text("Trajetos realizados salvos", style = MaterialTheme.typography.titleMedium)
                 if (savedRoutes.isEmpty()) Text("Seus trajetos reais salvos aparecerão aqui.", color = Muted)
                 if (selectedSavedId != null) OutlinedButton(onClick = { onSavedRouteSelect(null) }) { Text("Voltar ao último percurso") }
                 savedRoutes.forEach { saved ->

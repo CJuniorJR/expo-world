@@ -10,10 +10,10 @@ root = Path(__file__).resolve().parent.parent
 schemas = root / 'app/schemas/br.com.expoworld.storage.ExplorationDatabase'
 source = (root / 'app/src/main/java/br/com/expoworld/storage/ExplorationDatabase.kt').read_text(encoding='utf-8')
 normalizer = (root / 'app/src/main/java/br/com/expoworld/storage/UnifiedMigration.kt').read_text(encoding='utf-8')
-expected = json.loads((schemas / '7.json').read_text(encoding='utf-8'))['database']
+expected = json.loads((schemas / '8.json').read_text(encoding='utf-8'))['database']
 create = re.findall(r'db.execSQL\("(CREATE [^"\n]+)"\)', normalizer)
 columns = re.findall(r'ensureColumn\("([^"\n]+)", "([^"\n]+)", "([^"\n]+)"\)', normalizer)
-assert len(create) == 4 and len(columns) == 5
+assert len(create) == 5 and len(columns) == 5
 migrations = {int(start): re.findall(r'db.execSQL\("([^"\n]+)"\)', body)
     for start, body in re.findall(r'val MIGRATION_(\d+)_\d+ = object.*?override fun migrate.*?\{(.*?)\n    }\n}', source, re.S)}
 assert set(migrations) == {1, 2}
@@ -25,7 +25,7 @@ def normalize(db):
     for table, column, definition in columns:
         if column not in names(db,table): db.execute('ALTER TABLE '+table+' ADD COLUMN '+column+' '+definition)
 
-versions = [(str(v), schemas / (str(v)+'.json')) for v in range(1,7)]
+versions = [(str(v), schemas / (str(v)+'.json')) for v in range(1,8)]
 versions += [('home-'+str(v), root / ('app/schemas/legacy-home/br.com.expoworld.storage.ExplorationDatabase/'+str(v)+'.json')) for v in [4,5]]
 for label, path in versions:
     schema=json.loads(path.read_text(encoding='utf-8'))['database']; version=schema['version']
@@ -66,6 +66,10 @@ for label, path in versions:
     query=next(q for q in queries if q.startswith('SELECT neighborhoodId, SUM(meters)'))
     assert db.execute(query,{'mode':'real','dataset':'v1'}).fetchall()==[('bairro',20.0)]
     assert not db.execute(query,{'mode':'real','dataset':'v2'}).fetchall()
+    before={table:db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0] for table in ['cells','route_sessions','route_samples','street_visits']}
+    db.execute("INSERT INTO planned_routes VALUES ('plan','Volta',123,'{}')")
+    assert {table:db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0] for table in before}==before
+    assert db.execute("SELECT title FROM planned_routes WHERE id='plan'").fetchone()==('Volta',)
     db.close()
-    print('PASS:',label,'-> 7: cells, trips, titles/dates/credits preserved; unified schema, repeat-safe normalizer and shared unique street totals.')
-print('PASS: all eight historical schema variants from both branches; host SQLite (device tests still required).')
+    print('PASS:',label,'-> 8: cells, trips, titles/dates/credits preserved; unified schema, repeat-safe normalizer and shared unique street totals.')
+print('PASS: all nine historical schema variants from both branches; host SQLite (device tests still required).')
