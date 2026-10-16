@@ -6,6 +6,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ExplorationBackupTest {
+    @Test fun encoderCannotProduceBackupLargerThanRestoreLimit() {
+        val writer = StringWriter(); val encoder = ExplorationBackup.Encoder(writer, 256)
+        try {
+            repeat(100) { encoder.cell(Cell(it, it), 1_760_000_000_000L) }
+            fail("Must enforce both cell and byte limits")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(writer.toString().toByteArray().size < 256)
+        }
+    }
     private fun encode(cells: List<Cell>): String = StringWriter().also { writer ->
         val encoder = ExplorationBackup.Encoder(writer)
         cells.forEach { encoder.cell(it) }; assertEquals(cells.size.toLong(), encoder.finish())

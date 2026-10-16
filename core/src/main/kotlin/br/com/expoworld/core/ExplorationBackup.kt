@@ -17,14 +17,17 @@ object ExplorationBackup {
         val boundY = kotlin.math.ceil(Geo.project(Geo.MAX_LAT, 0.0).y / ExplorationConfig.CELL_PROJECTED_METERS).toInt()
         require(cell.x in -boundX until boundX && cell.y in -boundY until boundY) { "Coordenada inválida no backup." }
     }
-    class Encoder(private val writer: Writer) {
+    class Encoder(private val writer: Writer, private val maxBytes: Long = MAX_BYTES) {
         private val checksum = digest()
         private var count = 0L
+        private var bytes = HEADER.length + 1L
         init { writer.write("$HEADER\n") }
         fun cell(cell: Cell, firstDiscoveredAtMillis: Long? = null) {
             validate(cell); require(++count <= MAX_CELLS) { "Backup excede o limite de células." }
             require(firstDiscoveredAtMillis == null || firstDiscoveredAtMillis in 1..4102444800000L)
             val line = "${cell.x}\t${cell.y}\t${firstDiscoveredAtMillis ?: "-"}\n"
+            bytes += line.length
+            require(bytes + 128 <= maxBytes) { "Backup excede o limite de bytes." }
             checksum.update(line.toByteArray(Charsets.UTF_8)); writer.write(line)
         }
         fun finish(): Long {
