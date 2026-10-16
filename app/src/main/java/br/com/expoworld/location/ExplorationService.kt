@@ -47,7 +47,7 @@ class ExplorationService : Service(), LocationListener {
             ServiceCompat.startForeground(this, 1, notification(), if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0)
             started = true
             lastValid = now()
-            app.tracking.update { it.copy(active = true, simulated = false, position = null, liveHead = null, message = "Aguardando sinal GPS preciso…") }
+            app.tracking.update { it.copy(active = true, simulated = false, position = null, gpsFix = null, liveHead = null, message = "Aguardando sinal GPS preciso…") }
             worker = scope.launch(Dispatchers.IO) {
                 try {
                     processor.begin()
@@ -82,6 +82,7 @@ class ExplorationService : Service(), LocationListener {
         if (stopping) return
         val reliableSpeed = if (location.hasSpeed() && (Build.VERSION.SDK_INT < 26 || !location.hasSpeedAccuracy() || location.speedAccuracyMetersPerSecond <= 3f)) location.speed.toDouble() else null
         val fix = Fix(location.latitude, location.longitude, if (location.hasAccuracy()) location.accuracy.toDouble() else Double.POSITIVE_INFINITY, location.elapsedRealtimeNanos / 1e9, reliableSpeed)
+        app.tracking.update { it.copy(gpsFix = fix) }
         if (queue.trySend(fix).isFailure) {
             // End cleanly on storage backpressure; never bridge dropped queue entries.
             app.tracking.update { it.copy(message = "Gravação local lenta. Viagem encerrada para preservar os dados já salvos.") }

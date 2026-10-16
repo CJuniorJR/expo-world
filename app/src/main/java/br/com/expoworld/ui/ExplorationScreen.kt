@@ -27,6 +27,8 @@ import br.com.expoworld.core.RecordedTrace
 import br.com.expoworld.core.TracePresentation
 import br.com.expoworld.core.ExplorationProgress
 import br.com.expoworld.core.TripSummary
+import br.com.expoworld.core.GpsSignal
+import br.com.expoworld.core.GpsQuality
 import java.text.NumberFormat
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +51,7 @@ fun ExplorationScreen(
     status: String,
     mapStatus: String,
     precise: Boolean,
+    gpsSignal: GpsSignal,
     trace: RecordedTrace?,
     traceVisible: Boolean,
     onTraceVisibleChange: (Boolean) -> Unit,
@@ -77,6 +80,7 @@ fun ExplorationScreen(
         activeGps -> "Explorando"
         mapStatus.startsWith("Aproxime") -> "Aproxime para ver a exploração"
         mapStatus.isNotEmpty() -> "Confira o mapa"
+        trace?.isInterrupted(state.active) == true -> "Percurso interrompido • recuperado"
         trace != null && trace.samples.isNotEmpty() -> "Percurso concluído"
         !online -> "Sem internet"
         else -> "Pronto para explorar"
@@ -125,7 +129,12 @@ fun ExplorationScreen(
                     Row(Modifier.padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Box(Modifier.size(7.dp).background(statusColor, CircleShape))
-                        Text(statusLabel, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        Column {
+                            Text(statusLabel, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            if (!simulatedView && precise) Text(gpsSignal.label +
+                                (gpsSignal.accuracyMeters?.let { " • ~${it.toInt()} m" } ?: ""),
+                                color = if (gpsSignal.quality == GpsQuality.GOOD) Mint else Color(0xFFFFD589), fontSize = 10.sp)
+                        }
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -195,6 +204,12 @@ fun ExplorationScreen(
 
             HorizontalDivider(color = Color(0xFF2D414A))
             Text("Rastro por velocidade", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            if (trace?.isInterrupted(state.active) == true) Text(
+                "Recuperamos o trecho salvo antes da interrupção. O GPS está desligado; iniciar outra viagem substitui este rastro ao receber o primeiro ponto válido.",
+                color = Color(0xFFFFD589), style = MaterialTheme.typography.bodySmall)
+            if (trace != null) InfoCard(trace.newAreaSquareMeters?.let { areaLabel(it) } ?: "—",
+                if (trace.newAreaSquareMeters == null) "área nova indisponível neste percurso antigo" else "área nova neste percurso • estimativa",
+                Modifier.fillMaxWidth())
             when {
                 trace == null || trace.samples.isEmpty() -> Text(if (state.active) "Aguardando a primeira posição precisa para desenhar o rastro ao vivo."
                     else "Inicie um percurso para ver o rastro ao vivo e consulte o resumo ao encerrar.", color = Muted,
@@ -253,6 +268,12 @@ fun ExplorationScreen(
             }
             HorizontalDivider(color = Color(0xFF2D414A))
             Text("Localização", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            if (!simulatedView) {
+                Text(gpsSignal.label + (gpsSignal.accuracyMeters?.let { " • precisão estimada de ${it.toInt()} m" } ?: ""),
+                    color = if (gpsSignal.quality == GpsQuality.GOOD) Mint else Color(0xFFFFD589))
+                Text("O círculo azul representa a incerteza informada pelo GPS, não a área revelada. Leituras acima de 20 m não revelam o mapa.",
+                    color = Muted, style = MaterialTheme.typography.bodySmall)
+            }
             Text(if (precise) "Localização precisa autorizada" else "Autorize a localização precisa para revelar o caminho", color = Muted,
                 style = MaterialTheme.typography.bodySmall)
             if (state.active) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,

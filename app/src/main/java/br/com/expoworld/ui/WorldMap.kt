@@ -28,6 +28,7 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
     private var fogJob: Job? = null
     private var mode = "real"
     private var position: Fix? = null
+    private var accuracyFix: Fix? = null
     private var centered = false
     private var generation = 0
     private val density = context.resources.displayMetrics.density
@@ -35,6 +36,10 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
     private var bottomInset = 0
     private var trace: RecordedTrace? = null
     private var traceJob: Job? = null
+    private var liveHead: TraceSample? = null
+    private var renderedTail: List<Any?>? = null
+    private var pendingTail: List<Any?>? = null
+    private var renderedHistory: List<Any?>? = null
     private var focusPending: RecordedTrace? = null
     private val emptyFeatures = """{"type":"FeatureCollection","features":[]}"""
     private val fogMutex = Mutex()
@@ -99,6 +104,7 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         }
         m.setStyle(builder) { s ->
             style = s
+            renderedTail = null; renderedHistory = null; pendingTail = null
             s.addSource(GeoJsonSource("fog", FogGeometry.geoJson(emptyList())))
             s.addLayer(FillLayer("fog-fill", "fog").withProperties(fillColor("#101820"), fillOpacity(.55f), fillAntialias(true)))
             s.addSource(GeoJsonSource("speed-route", emptyFeatures))
@@ -107,9 +113,19 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
                 lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
             s.addLayer(LineLayer("speed-route-color", "speed-route").withProperties(lineColor(Expression.get("color")), lineWidth(6f),
                 lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
+            listOf("speed-recent", "speed-live").forEach { id ->
+                s.addSource(GeoJsonSource(id, emptyFeatures))
+                s.addLayer(LineLayer("$id-outline", id).withProperties(lineColor("#102027"), lineWidth(10f),
+                    lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
+                s.addLayer(LineLayer("$id-color", id).withProperties(lineColor(Expression.get("color")), lineWidth(6f),
+                    lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
+            }
             s.addLayer(CircleLayer("speed-stop-dots", "speed-stops").withProperties(circleColor("#21404A"), circleRadius(9f),
                 circleStrokeColor("#C9FFF1"), circleStrokeWidth(2.5f)))
             s.addSource(GeoJsonSource("position"))
+            s.addSource(GeoJsonSource("accuracy", AccuracyGeometry.geoJson(accuracyFix)))
+            s.addLayer(FillLayer("accuracy-fill", "accuracy").withProperties(fillColor("#69ABFF"), fillOpacity(.16f)))
+            s.addLayer(LineLayer("accuracy-border", "accuracy").withProperties(lineColor("#69ABFF"), lineWidth(1.5f)))
             s.addLayer(CircleLayer("position-dot", "position").withProperties(circleColor("#007DFF"), circleRadius(7f), circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
             updatePosition(position)
             loadFailure = false
@@ -134,29 +150,48 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         if (!centered && map != null) { center(); centered = true }
         else if (following) map?.easeCamera(CameraUpdateFactory.newLatLng(LatLng(fix.latitude, fix.longitude)), 700)
     }
+    fun updateAccuracy(fix: Fix?) {
+        accuracyFix = fix
+        style?.getSourceAs<GeoJsonSource>("accuracy")?.setGeoJson(AccuracyGeometry.geoJson(fix))
+    }
     fun center() { position?.let { map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), 16.0)) } }
-    fun setTrace(value: RecordedTrace?) {
+    fun setTrace(value: RecordedTrace?, head: TraceSample? = null) {
         trace = value
+        liveHead = head
         if (value == null) focusPending = null
         renderTrace()
     }
     private fun renderTrace() {
-        traceJob?.cancel()
         val s = style ?: return
         val data = trace
         if (data == null) {
-            s.getSourceAs<GeoJsonSource>("speed-route")?.setGeoJson(emptyFeatures)
-            s.getSourceAs<GeoJsonSource>("speed-stops")?.setGeoJson(emptyFeatures)
+            traceJob?.cancel()
+            renderedTail = null; renderedHistory = null; pendingTail = null
+            listOf("speed-route", "speed-recent", "speed-live", "speed-stops").forEach {
+                s.getSourceAs<GeoJsonSource>(it)?.setGeoJson(emptyFeatures)
+            }
             return
         }
+        s.getSourceAs<GeoJsonSource>("speed-live")?.setGeoJson(
+            TracePresentation.lineGeoJson(TraceChunks.live(data.samples, liveHead)))
+        val key = listOf(data.mode, data.startedAtMillis, data.samples.firstOrNull()?.sequence, data.samples.size, data.samples.lastOrNull())
+        if (key == renderedTail || key == pendingTail) return
+        traceJob?.cancel()
+        pendingTail = key
+        val window = TraceChunks.split(data.samples)
+        val historyKey = listOf(data.mode, data.startedAtMillis, window.history.firstOrNull()?.sequence, window.history.lastOrNull()?.sequence)
+        val historyChanged = historyKey != renderedHistory
         traceJob = scope.launch {
             val json = withContext(Dispatchers.Default) {
-                TracePresentation.lineGeoJson(data.samples) to TracePresentation.stopGeoJson(data.samples)
+                Triple(if (historyChanged) TracePresentation.lineGeoJson(window.history) else null,
+                    TracePresentation.lineGeoJson(window.recent), TracePresentation.stopGeoJson(data.samples))
             }
             ensureActive()
-            if (style === s && trace === data) {
-                s.getSourceAs<GeoJsonSource>("speed-route")?.setGeoJson(json.first)
-                s.getSourceAs<GeoJsonSource>("speed-stops")?.setGeoJson(json.second)
+            if (style === s) {
+                json.first?.let { s.getSourceAs<GeoJsonSource>("speed-route")?.setGeoJson(it) }
+                s.getSourceAs<GeoJsonSource>("speed-recent")?.setGeoJson(json.second)
+                s.getSourceAs<GeoJsonSource>("speed-stops")?.setGeoJson(json.third)
+                renderedTail = key; renderedHistory = historyKey; pendingTail = null
             }
         }
     }

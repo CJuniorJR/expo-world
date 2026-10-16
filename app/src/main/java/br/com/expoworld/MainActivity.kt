@@ -26,10 +26,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.com.expoworld.core.Fix
 import br.com.expoworld.core.ExplorationProgress
 import br.com.expoworld.core.TracePresentation
+import br.com.expoworld.core.GpsSignal
+import br.com.expoworld.core.GpsQuality
 import br.com.expoworld.location.*
 import br.com.expoworld.ui.WorldMap
 import br.com.expoworld.ui.ExplorationScreen
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import org.maplibre.android.MapLibre
 
 class MainActivity : ComponentActivity() {
@@ -45,6 +48,8 @@ class MainActivity : ComponentActivity() {
     private val manager get() = getSystemService(LocationManager::class.java)
     private val preview = object : LocationListener {
         override fun onLocationChanged(location: Location) {
+            if (!app.tracking.value.active) app.tracking.update { it.copy(gpsFix = Fix(location.latitude, location.longitude,
+                if (location.hasAccuracy()) location.accuracy.toDouble() else Double.POSITIVE_INFINITY, location.elapsedRealtimeNanos / 1e9)) }
             if (!app.tracking.value.active && location.hasAccuracy() && location.accuracy <= 50 && SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos < 10_000_000_000L) {
                 app.tracking.update { it.copy(simulated = false, position = Fix(location.latitude, location.longitude, location.accuracy.toDouble(), location.elapsedRealtimeNanos / 1e9)) }
             }
@@ -127,6 +132,9 @@ class MainActivity : ComponentActivity() {
     }
     @Composable private fun Screen() {
         val state by app.tracking.collectAsStateWithLifecycle()
+        val now by produceState(SystemClock.elapsedRealtimeNanos() / 1e9) {
+            while (true) { value = SystemClock.elapsedRealtimeNanos() / 1e9; delay(2000) }
+        }
         var simulatedView by rememberSaveable { mutableStateOf(false) }
         val viewMode = if (state.active) { if (state.simulated) "simulation" else "real" } else if (simulatedView) "simulation" else "real"
         val progressFlow = remember(viewMode) { app.repository.progress(viewMode) }
@@ -137,9 +145,7 @@ class MainActivity : ComponentActivity() {
         val traceFlow = remember(viewMode) { app.repository.route(viewMode) }
         val completedTrace by traceFlow.collectAsStateWithLifecycle(null)
         val route = completedTrace?.takeIf { it.mode == viewMode }
-        val displayedRoute = route?.takeIf { if (state.active) !it.completed else it.completed }?.let {
-            if (state.active) it.copy(samples = TracePresentation.withLiveHead(it.samples, state.liveHead)) else it
-        }
+        val displayedRoute = route?.takeIf { !state.active || !it.completed }
         var traceVisible by rememberSaveable { mutableStateOf(true) }
         val mapStatus by mapMessage
         val currentDialog by dialog
@@ -148,16 +154,22 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(viewMode, progress.cells) { worldMap.setMode(viewMode) }
         LaunchedEffect(state.position, viewMode) { worldMap.updatePosition(state.position.takeIf { state.simulated == (viewMode == "simulation") }) }
         LaunchedEffect(state.active, route?.startedAtMillis, route?.completed, viewMode) {
-            if (!state.active && route?.completed == true) { traceVisible = true; worldMap.focusTrace(route) }
+            if (!state.active && route != null) { traceVisible = true; worldMap.focusTrace(route) }
             if (state.active) worldMap.setFollowing(true) else worldMap.setFollowing(false)
         }
-        LaunchedEffect(displayedRoute, traceVisible, state.active) { worldMap.setTrace(displayedRoute.takeIf { traceVisible || state.active }) }
+        LaunchedEffect(displayedRoute, state.liveHead, traceVisible, state.active) {
+            worldMap.setTrace(displayedRoute.takeIf { traceVisible || state.active }, state.liveHead.takeIf { state.active })
+        }
         var wasOnline by remember { mutableStateOf(online) }
         LaunchedEffect(online) { if (!wasOnline && online) worldMap.retryIfNeeded(); wasOnline = online }
         val status = if (!state.active && state.simulated != (viewMode == "simulation")) {
             if (viewMode == "simulation") "Modo simulado. Inicie o trajeto de desenvolvimento para testar a revelação."
             else "Exploração real. Suas áreas estão salvas; inicie uma viagem para revelar novos lugares."
         } else state.message
+        val gpsSignal = GpsSignal.from(state.gpsFix.takeIf { precise && viewMode == "real" }, now)
+        LaunchedEffect(state.gpsFix, gpsSignal, viewMode) {
+            worldMap.updateAccuracy(state.gpsFix.takeIf { gpsSignal.quality != GpsQuality.LOST && viewMode == "real" })
+        }
         ExplorationScreen(
             worldMap = worldMap,
             state = state,
@@ -169,6 +181,7 @@ class MainActivity : ComponentActivity() {
             status = status,
             mapStatus = mapStatus,
             precise = precise,
+            gpsSignal = gpsSignal,
             trace = displayedRoute,
             traceVisible = traceVisible,
             onTraceVisibleChange = { traceVisible = it },
