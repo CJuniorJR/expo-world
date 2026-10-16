@@ -24,18 +24,24 @@ class ExpeditionExporter(private val app: WorldApp) {
         try {
             withContext(Dispatchers.Default) {
                 if (animated) {
-                    val width = 360; val height = 480
+                    val width = 720; val height = 960
                     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                     val pixels = IntArray(width * height); val indexed = ByteArray(pixels.size)
                     try {
                         temp.outputStream().buffered().use { output ->
-                            val gif = ExpeditionGif(output, width, height, ExpeditionGif.MAP_PALETTE)
-                            for (frame in 0 until 40) {
+                            // Learn colors from the complete card once; reuse its map and
+                            // palette throughout the animation, with no per-frame color shifts.
+                            ExpeditionRenderer.draw(Canvas(bitmap), ExpeditionArt.scene(route, title, date, theme = theme, mapPoint = map.point), width.toFloat(), height.toFloat(), map = map.bitmap)
+                            bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+                            val palette = ExpeditionPalette.from(pixels, intArrayOf(0x000000, 0xFFFFFF,
+                                0x101C22, 0xFFD166, theme.accent, theme.traceDark, theme.traceLight))
+                            val gif = ExpeditionGif(output, width, height, palette.colors)
+                            for (frame in 0 until 100) {
                                 coroutineContext.ensureActive()
-                                ExpeditionRenderer.draw(Canvas(bitmap), ExpeditionArt.scene(route, title, date, frame / 39f, theme, map.point), width.toFloat(), height.toFloat(), false, map.bitmap)
+                                ExpeditionRenderer.draw(Canvas(bitmap), ExpeditionArt.scene(route, title, date, frame / 99f, theme, map.point), width.toFloat(), height.toFloat(), true, map.bitmap)
                                 bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-                                pixels.forEachIndexed { i, pixel -> indexed[i] = ExpeditionGif.mapIndex(pixel) }
-                                gif.frame(indexed, if (frame == 39) 150 else 25)
+                                palette.index(pixels, indexed)
+                                gif.frame(indexed, if (frame == 99) 150 else 10)
                             }
                             gif.finish()
                         }

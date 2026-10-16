@@ -121,6 +121,14 @@ fun ExplorationScreen(
     onGpsSettings: () -> Unit
 ) {
     var menuOpen by rememberSaveable { mutableStateOf(false) }
+    var menuSection by rememberSaveable { mutableIntStateOf(0) }
+    var confirmEnd by rememberSaveable { mutableStateOf(false) }
+    val requestTripAction: () -> Unit = {
+        if (state.active) confirmEnd = true
+        else { menuOpen = false; onTripToggle() }
+    }
+    LaunchedEffect(state.active) { if (!state.active) confirmEnd = false }
+    var traceDetails by rememberSaveable { mutableStateOf(false) }
     var titleDialog by rememberSaveable { mutableStateOf(false) }
     var routeTitle by rememberSaveable { mutableStateOf("") }
     if (titleDialog && canSave) AlertDialog(
@@ -203,7 +211,7 @@ fun ExplorationScreen(
     val activeGps = state.active && !state.simulated
     val waitingGps = activeGps && !state.message.startsWith("Explorando")
     val statusLabel = when {
-        storageBusy -> "Processando backup…"
+        storageBusy -> "Preparando arquivo…"
         state.active && state.paused -> if (simulatedView) "MODO SIMULADO • pausado" else "Percurso pausado"
         simulatedView -> "MODO SIMULADO"
         waitingGps -> when {
@@ -263,6 +271,17 @@ fun ExplorationScreen(
                 }
             }
 
+            if (!state.active && presentation == MapPresentation.NORMAL) Row(
+                Modifier.align(Alignment.TopStart).padding(top = 90.dp).fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onClick = { onPocketOpen() }, enabled = !simulatedView && !storageBusy,
+                    modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Planejar volta") }
+                FilledTonalButton(onClick = { menuSection = 1; menuOpen = true }, modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 10.dp)) {
+                    Text("Bairros" + if (cityProgress.totalMeters > 0) String.format(Locale.forLanguageTag("pt-BR"),
+                        " • %.1f%%", 100 * cityProgress.visitedMeters / cityProgress.totalMeters) else "")
+                }
+            }
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (presentation != MapPresentation.NORMAL) Surface(color = Ink.copy(alpha = .97f), shape = RoundedCornerShape(20.dp)) {
@@ -306,17 +325,23 @@ fun ExplorationScreen(
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    Button(onClick = onTripToggle, enabled = !storageBusy, colors = actionColors, shape = RoundedCornerShape(20.dp),
+                    Button(onClick = { if (state.active) onPauseToggle() else requestTripAction() }, enabled = !storageBusy,
+                        colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Ink), shape = RoundedCornerShape(20.dp),
                         modifier = Modifier.weight(1f).heightIn(min = 56.dp), contentPadding = PaddingValues(14.dp)) {
-                        Icon(painterResource(if (state.active) R.drawable.ic_stop else R.drawable.ic_explore), null,
+                        Icon(painterResource(if (state.active) { if (state.paused) R.drawable.ic_play else R.drawable.ic_pause } else R.drawable.ic_explore), null,
                             modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(10.dp))
-                        Text(actionLabel, fontWeight = FontWeight.SemiBold)
+                        Text(if (state.active) { if (state.paused) "Continuar percurso" else "Pausar percurso" } else actionLabel, fontWeight = FontWeight.SemiBold)
                     }
                     FilledTonalIconButton(onClick = onCenter, modifier = Modifier.size(56.dp),
                         colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = if (following) Mint else Ink, contentColor = if (following) Ink else Mint)) {
                         Icon(painterResource(R.drawable.ic_center), if (following) "Acompanhando minha posição" else "Centralizar na minha posição", modifier = Modifier.size(24.dp))
                     }
+                }
+                if (state.active) TextButton(onClick = requestTripAction, enabled = !storageBusy,
+                    colors = ButtonDefaults.textButtonColors(contentColor = if (palette.light) Color(0xFF9B3028) else Color(0xFFFFB4AB))) {
+                    Icon(painterResource(R.drawable.ic_stop), null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp)); Text("Encerrar percurso")
                 }
                 if(pocket.plan!=null && pocket.active && state.active && !simulatedView) Surface(color=Ink,contentColor=Paper,shape=RoundedCornerShape(14.dp)){
                     Column(Modifier.fillMaxWidth().padding(12.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
@@ -339,10 +364,10 @@ fun ExplorationScreen(
         contentColor = Paper,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     ) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp)
-            .padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(.94f).padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column {
+                Column(Modifier.weight(1f)) {
                     Text("Sua exploração", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text(if (simulatedView) "Modo simulado • dados separados" else "Novos caminhos, no seu ritmo", color = Muted,
                         style = MaterialTheme.typography.bodySmall)
@@ -351,234 +376,267 @@ fun ExplorationScreen(
                     Icon(painterResource(R.drawable.ic_close), "Fechar menu")
                 }
             }
-            OutlinedButton(onClick={menuOpen=false;onPocketOpen()},enabled=!simulatedView && !storageBusy,modifier=Modifier.fillMaxWidth()){Text("Exploração de bolso • planejar uma volta")}
-            if(simulatedView)Text("Volte ao modo real para planejar roteiros.",style=MaterialTheme.typography.bodySmall)
-            ThemePicker(onThemeChange)
-            Text("Atividade", style = MaterialTheme.typography.titleMedium)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                ActivityKind.entries.forEach { activity ->
-                    FilterChip(selected = state.activity == activity, enabled = !state.active,
-                        onClick = { onActivityChange(activity) }, label = { Text(activity.label, fontSize = 12.sp) },
-                        modifier = Modifier.weight(1f))
+            listOf("Explorar", "Bairros", "Trajetos", "Ajustes").chunked(2).forEachIndexed { row, labels ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    labels.forEachIndexed { column, label ->
+                        val index = row * 2 + column
+                        FilterChip(selected = menuSection == index, onClick = { menuSection = index },
+                            label = { Text(label, fontWeight = FontWeight.SemiBold) }, modifier = Modifier.weight(1f))
+                    }
                 }
             }
-            Text(if (state.active) "${state.activity.label} em andamento. Encerre para trocar de atividade."
-                else "Escolha a atividade antes de iniciar. O mapa e o progresso são compartilhados entre carro, caminhada e bicicleta.", color = Muted,
-                style = MaterialTheme.typography.bodySmall)
-            NeighborhoodPanel(cityProgress, simulatedView, state.position != null && state.simulated == simulatedView) { id ->
-                onNeighborhoodFocus(id); menuOpen = false
-            }
-            Surface(shape = RoundedCornerShape(20.dp), color = Card, contentColor = Paper) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(statusLabel, color = statusColor, style = MaterialTheme.typography.labelLarge)
-                    Text(status, style = MaterialTheme.typography.bodyMedium)
-                    if (!online) Text("Sem internet: o mapa pode ficar sem ruas novas, mas o GPS e a gravação no aparelho continuam.",
-                        color = if (LocalExplorerTheme.current.light) Color(0xFF805500) else Color(0xFFFFD589), style = MaterialTheme.typography.bodySmall)
-                    if (notificationsHidden) Text("Notificação oculta: encerre pelo app ou pelo gerenciador de apps ativos do Android.",
-                        color = if (LocalExplorerTheme.current.light) Color(0xFF805500) else Color(0xFFFFD589), style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                InfoCard(areaLabel(progress.areaSquareMeters), "área descoberta • estimativa", Modifier.weight(1f))
-                InfoCard("50 m", "de cada lado do trajeto", Modifier.weight(1f))
-            }
-            if (state.active) OutlinedButton(onClick = onPauseToggle, modifier = Modifier.fillMaxWidth()) {
-                Text(if (state.paused) "Continuar este percurso" else "Pausar este percurso")
-            }
-            Text("Suas descobertas ficam salvas neste aparelho e se acumulam entre viagens.", color = Muted,
-                style = MaterialTheme.typography.bodySmall)
-            OutlinedButton(onClick = { onOverview(); menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
-                Text("Ver todas as descobertas")
-            }
-            Text("Intensidade da névoa • ${(fogOpacity * 100).toInt()}%", style = MaterialTheme.typography.titleMedium)
-            Slider(value = fogOpacity, onValueChange = onFogOpacityChange, valueRange = .2f.. .8f)
-            if (!state.active && trace != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(Modifier.weight(1f)) {
-                    Text("Destacar áreas novas", style = MaterialTheme.typography.bodyMedium)
-                    Text("Dourado • último percurso • por 2 minutos", color = Muted, style = MaterialTheme.typography.bodySmall)
-                }
-                Switch(checked = highlight, onCheckedChange = onHighlightChange)
-            }
-            Surface(shape = RoundedCornerShape(20.dp), color = Tint, contentColor = Paper) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("✦  ${progress.title}", color = Mint, style = MaterialTheme.typography.titleMedium)
-                    LinearProgressIndicator(progress = { progress.progressToNext }, modifier = Modifier.fillMaxWidth(),
-                        color = Mint, trackColor = Track)
-                    Text(progress.nextTarget?.let { "Próximo marco: ${areaLabel(it)} descobertos" }
-                        ?: "Seu mapa continua crescendo a cada novo caminho.", color = Muted, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-
+            Text(when (menuSection) {
+                    1 -> "Percentuais por bairro e suas descobertas"
+                    2 -> "Salvar, rever e compartilhar seus percursos"
+                    3 -> "Aparência, mapa, localização e backup"
+                    else -> "Planeje uma volta ou comece a explorar"
+                }, color = Muted, style = MaterialTheme.typography.bodySmall)
             HorizontalDivider(color = Track)
-            Text("Rastro por velocidade", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            trace?.let { Text("Percurso: ${it.activity.label}", color = Muted, style = MaterialTheme.typography.bodySmall) }
-            savedRoutes.firstOrNull { it.id == selectedSavedId }?.let { Text(it.title, color = Mint) }
-            if (trace?.isInterrupted(state.active) == true) Text(
-                "Recuperamos o trecho salvo antes da interrupção. A gravação está encerrada; iniciar outra viagem substitui este rastro ao receber o primeiro ponto válido.",
-                color = Color(0xFFFFD589), style = MaterialTheme.typography.bodySmall)
-            if (trace != null) InfoCard(trace.newAreaSquareMeters?.let { areaLabel(it) } ?: "—",
-                if (trace.newAreaSquareMeters == null) "área nova indisponível neste percurso antigo" else "área nova neste percurso • estimativa",
-                Modifier.fillMaxWidth())
-            when {
-                trace == null || trace.samples.isEmpty() -> Text(if (state.active) "Aguardando a primeira posição precisa para desenhar o rastro ao vivo."
-                    else "Inicie um percurso para ver o rastro ao vivo e consulte o resumo ao encerrar.", color = Muted,
-                    style = MaterialTheme.typography.bodySmall)
-                else -> {
-                    if (state.active) Text("Rastro ao vivo. As cores e paradas se atualizam durante o percurso.", color = Mint,
-                        style = MaterialTheme.typography.bodySmall)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (state.active) "Rastro visível ao vivo" else "Exibir percurso", modifier = Modifier.weight(1f))
-                        Switch(checked = traceVisible || state.active, onCheckedChange = onTraceVisibleChange, enabled = !state.active)
+            key(menuSection) {
+                Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                    if (menuSection == 0) {
+                        OutlinedButton(onClick={menuOpen=false;onPocketOpen()},enabled=!simulatedView && !storageBusy,modifier=Modifier.fillMaxWidth()){Text("Exploração de bolso • planejar uma volta")}
+                        if(simulatedView)Text("Volte ao modo real para planejar roteiros.",style=MaterialTheme.typography.bodySmall)
+                        Text("Atividade", style = MaterialTheme.typography.titleMedium)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            ActivityKind.entries.forEach { activity ->
+                                FilterChip(selected = state.activity == activity, enabled = !state.active,
+                                    onClick = { onActivityChange(activity) }, label = { Text(activity.label, fontSize = 12.sp) },
+                                    modifier = Modifier.weight(1f))
+                            }
+                        }
+                        Text(if (state.active) "${state.activity.label} em andamento. Encerre para trocar de atividade."
+                            else "Escolha a atividade antes de iniciar. O mapa e o progresso são compartilhados entre carro, caminhada e bicicleta.", color = Muted,
+                            style = MaterialTheme.typography.bodySmall)
+                        Surface(shape = RoundedCornerShape(20.dp), color = Card, contentColor = Paper) {
+                            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text(statusLabel, color = statusColor, style = MaterialTheme.typography.labelLarge)
+                                Text(status, style = MaterialTheme.typography.bodyMedium)
+                                if (!online) Text("Sem internet: o mapa pode ficar sem ruas novas, mas o GPS e a gravação no aparelho continuam.",
+                                    color = if (LocalExplorerTheme.current.light) Color(0xFF805500) else Color(0xFFFFD589), style = MaterialTheme.typography.bodySmall)
+                                if (notificationsHidden) Text("Notificação oculta: encerre pelo app ou pelo gerenciador de apps ativos do Android.",
+                                    color = if (LocalExplorerTheme.current.light) Color(0xFF805500) else Color(0xFFFFD589), style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                        if (state.active) OutlinedButton(onClick = onPauseToggle, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (state.paused) "Continuar este percurso" else "Pausar este percurso")
+                        }
+                        Button(onClick = requestTripAction, enabled = !storageBusy, colors = actionColors, shape = RoundedCornerShape(18.dp),
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) { Text(actionLabel, fontWeight = FontWeight.SemiBold) }
                     }
-                    val currentSummary = summary
-                    if (currentSummary != null) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        InfoCard(distanceLabel(currentSummary.distanceMeters), "distância registrada", Modifier.weight(1f))
-                        InfoCard(durationLabel(currentSummary.recordedSeconds), "tempo de registros", Modifier.weight(1f))
+                    if (menuSection == 1) {
+                        NeighborhoodPanel(cityProgress, simulatedView, state.position != null && state.simulated == simulatedView) { id ->
+                            onNeighborhoodFocus(id); menuOpen = false
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            InfoCard(areaLabel(progress.areaSquareMeters), "área descoberta • estimativa", Modifier.weight(1f))
+                            InfoCard("50 m", "de cada lado do trajeto", Modifier.weight(1f))
+                        }
+                        Text("Suas descobertas ficam salvas neste aparelho e se acumulam entre viagens.", color = Muted,
+                            style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(onClick = { onOverview(); menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Ver todas as descobertas")
+                        }
+                        Surface(shape = RoundedCornerShape(20.dp), color = Tint, contentColor = Paper) {
+                            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text("✦  ${progress.title}", color = Mint, style = MaterialTheme.typography.titleMedium)
+                                LinearProgressIndicator(progress = { progress.progressToNext }, modifier = Modifier.fillMaxWidth(),
+                                    color = Mint, trackColor = Track)
+                                Text(progress.nextTarget?.let { "Próximo marco: ${areaLabel(it)} descobertos" }
+                                    ?: "Seu mapa continua crescendo a cada novo caminho.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+
                     }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        InfoCard(durationLabel(currentSummary.stoppedSeconds), "parado • estimativa", Modifier.weight(1f))
-                        InfoCard(if (trace.activity == ActivityKind.WALK) paceLabel(currentSummary.averageKmh)
-                            else currentSummary.averageKmh?.let { String.format(Locale.forLanguageTag("pt-BR"), "%.0f km/h", it) } ?: "—",
-                            if (trace.activity == ActivityKind.WALK) "ritmo médio • min/km" else "velocidade média • GPS", Modifier.weight(1f))
-                    }
-                    if (currentSummary.missingGpsSeconds >= 1) Text("${durationLabel(currentSummary.missingGpsSeconds)} sem registro (sinal ou pausa); lacunas não entram na distância.",
-                        color = Muted, style = MaterialTheme.typography.bodySmall)
-                    if (currentSummary.partial) Text("Resumo parcial: o percurso ultrapassou o limite de amostras e mostra a parte mais recente.",
-                        color = Muted, style = MaterialTheme.typography.bodySmall)
-                    }
-                    Box(Modifier.fillMaxWidth().height(12.dp).background(
-                        Brush.horizontalGradient(listOf(Color.Black,
-                            Color(android.graphics.Color.parseColor(TracePresentation.color(trace.activity.brightKmh / 2, trace.activity.brightKmh, trace.activity.stopKmh, LocalExplorerTheme.current))),
-                            themeColor(LocalExplorerTheme.current.traceLight))), RoundedCornerShape(6.dp)))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("0 km/h", color = Muted, fontSize = 11.sp)
-                        Text("${(trace.activity.brightKmh / 2).toInt()} km/h", color = Muted, fontSize = 11.sp)
-                        Text("${trace.activity.brightKmh.toInt()}+ km/h", color = Muted, fontSize = 11.sp)
-                    }
-                    Text("Preto: parado (até ${trace.activity.stopKmh} km/h). Escuro: lento. Claro: mais rápido. Cinza: velocidade não estimada.", color = Muted,
-                        style = MaterialTheme.typography.bodySmall)
-                    val stoppedSeconds = currentSummary?.stoppedSeconds?.toInt() ?: 0
-                    Text("${currentSummary?.stops ?: 0} paradas detectadas • ${stoppedSeconds / 60} min ${stoppedSeconds % 60} s",
-                        color = Mint, style = MaterialTheme.typography.labelLarge)
-                    Text("Paradas de pelo menos 5 segundos entram no resumo. O rastro fica preto, sem círculos. A velocidade não confirma congestionamento.",
-                        color = Muted, style = MaterialTheme.typography.bodySmall)
-                    OutlinedButton(onClick = { onTraceVisibleChange(true); onTraceFocus(); menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Enquadrar percurso")
-                    }
-                }
-            }
-            Text("Salve o percurso real antes de começar outro para mantê-lo na sua lista.", color = Muted,
-                style = MaterialTheme.typography.bodySmall)
-            if (!simulatedView) {
-                if (canSave) Button(enabled = !saveBusy, onClick = { routeTitle = ""; titleDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (saveBusy) "Salvando…" else "Salvar trajeto com título")
-                }
-                if (saveMessage.isNotEmpty()) Text(saveMessage, color = Mint)
-                Text("Trajetos realizados salvos", style = MaterialTheme.typography.titleMedium)
-                if (savedRoutes.isEmpty()) Text("Seus trajetos reais salvos aparecerão aqui.", color = Muted)
-                if (selectedSavedId != null) OutlinedButton(onClick = { onSavedRouteSelect(null) }) { Text("Voltar ao último percurso") }
-                savedRoutes.forEach { saved ->
-                    OutlinedButton(enabled = !state.active, onClick = { onSavedRouteSelect(saved.id); menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.fillMaxWidth()) {
-                            Text(saved.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(ActivityKind.fromKey(saved.activity).label + " • " + java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
-                                .format(java.util.Date(saved.startedAtMillis)), style = MaterialTheme.typography.bodySmall)
+                    if (menuSection == 2) {
+                        Text("Rever e compartilhar", style = MaterialTheme.typography.titleMedium)
+                        if (!state.active) {
+                            OutlinedButton(onClick = { presentationIndex = MapPresentation.EPOCHS.ordinal; playing = false; menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Mapa das primeiras vezes")
+                            }
+                            if (trace != null && trace.samples.isNotEmpty()) {
+                                OutlinedButton(onClick = { onTraceVisibleChange(true); onTraceFocus(); comparison = .5f; presentationIndex = MapPresentation.COMPARE.ordinal; playing = false; menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Comparar antes e depois")
+                                }
+                                OutlinedButton(onClick = { onTraceVisibleChange(true); replayFraction = 0f; presentationIndex = MapPresentation.REPLAY.ordinal; playing = true; menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Reproduzir percurso selecionado")
+                                }
+                                Button(onClick = { playing = false; cardOpen = true; menuOpen = false }, enabled = !storageBusy, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Criar cartão e exportar animação")
+                                }
+                            }
+                        } else Text("Encerre a viagem para rever e exportar.", color = Muted)
+                        if (trace != null && !state.active) OutlinedButton(onClick = { summaryOpen = true; menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Abrir resumo do percurso")
+                        }
+                        Text("Replay e comparação não alteram suas descobertas. Datas antigas ficam desconhecidas. Viagens antigas podem ter apenas replay da linha, sem a ordem de revelação. Sem áreas novas registradas, antes e depois ficam iguais. Pausas e falhas de sinal são respeitadas.", color = Muted,
+                            style = MaterialTheme.typography.bodySmall)
+                        HorizontalDivider(color = Track)
+                        Text("Salve o percurso real antes de começar outro para mantê-lo na sua lista.", color = Muted,
+                            style = MaterialTheme.typography.bodySmall)
+                        if (!simulatedView) {
+                            if (canSave) Button(enabled = !saveBusy, onClick = { routeTitle = ""; titleDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                                Text(if (saveBusy) "Salvando…" else "Salvar trajeto com título")
+                            }
+                            if (saveMessage.isNotEmpty()) Text(saveMessage, color = Mint)
+                            Text("Trajetos realizados salvos", style = MaterialTheme.typography.titleMedium)
+                            if (savedRoutes.isEmpty()) Text("Seus trajetos reais salvos aparecerão aqui.", color = Muted)
+                            if (selectedSavedId != null) OutlinedButton(onClick = { onSavedRouteSelect(null) }) { Text("Voltar ao último percurso") }
+                            savedRoutes.forEach { saved ->
+                                OutlinedButton(enabled = !state.active, onClick = { onSavedRouteSelect(saved.id); menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
+                                    Column(Modifier.fillMaxWidth()) {
+                                        Text(saved.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        Text(ActivityKind.fromKey(saved.activity).label + " • " + java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+                                            .format(java.util.Date(saved.startedAtMillis)), style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
+                        }
+                        OutlinedButton(onClick = { traceDetails = !traceDetails }, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (traceDetails) "Ocultar detalhes do rastro" else "Ver detalhes e cores do rastro")
+                        }
+                        if (traceDetails) {
+                            HorizontalDivider(color = Track)
+                            Text("Rastro por velocidade", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            trace?.let { Text("Percurso: ${it.activity.label}", color = Muted, style = MaterialTheme.typography.bodySmall) }
+                            savedRoutes.firstOrNull { it.id == selectedSavedId }?.let { Text(it.title, color = Mint) }
+                            if (trace?.isInterrupted(state.active) == true) Text(
+                                "Recuperamos o trecho salvo antes da interrupção. A gravação está encerrada; iniciar outra viagem substitui este rastro ao receber o primeiro ponto válido.",
+                                color = Color(0xFFFFD589), style = MaterialTheme.typography.bodySmall)
+                            if (trace != null) InfoCard(trace.newAreaSquareMeters?.let { areaLabel(it) } ?: "—",
+                                if (trace.newAreaSquareMeters == null) "área nova indisponível neste percurso antigo" else "área nova neste percurso • estimativa",
+                                Modifier.fillMaxWidth())
+                            when {
+                                trace == null || trace.samples.isEmpty() -> Text(if (state.active) "Aguardando a primeira posição precisa para desenhar o rastro ao vivo."
+                                    else "Inicie um percurso para ver o rastro ao vivo e consulte o resumo ao encerrar.", color = Muted,
+                                    style = MaterialTheme.typography.bodySmall)
+                                else -> {
+                                    if (state.active) Text("Rastro ao vivo. As cores e paradas se atualizam durante o percurso.", color = Mint,
+                                        style = MaterialTheme.typography.bodySmall)
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                        Text(if (state.active) "Rastro visível ao vivo" else "Exibir percurso", modifier = Modifier.weight(1f))
+                                        Switch(checked = traceVisible || state.active, onCheckedChange = onTraceVisibleChange, enabled = !state.active)
+                                    }
+                                    val currentSummary = summary
+                                    if (currentSummary != null) {
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                            InfoCard(distanceLabel(currentSummary.distanceMeters), "distância registrada", Modifier.weight(1f))
+                                            InfoCard(durationLabel(currentSummary.recordedSeconds), "tempo de registros", Modifier.weight(1f))
+                                        }
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                            InfoCard(durationLabel(currentSummary.stoppedSeconds), "parado • estimativa", Modifier.weight(1f))
+                                            InfoCard(if (trace.activity == ActivityKind.WALK) paceLabel(currentSummary.averageKmh)
+                                                else currentSummary.averageKmh?.let { String.format(Locale.forLanguageTag("pt-BR"), "%.0f km/h", it) } ?: "—",
+                                                if (trace.activity == ActivityKind.WALK) "ritmo médio • min/km" else "velocidade média • GPS", Modifier.weight(1f))
+                                        }
+                                        if (currentSummary.missingGpsSeconds >= 1) Text("${durationLabel(currentSummary.missingGpsSeconds)} sem registro (sinal ou pausa); lacunas não entram na distância.",
+                                            color = Muted, style = MaterialTheme.typography.bodySmall)
+                                        if (currentSummary.partial) Text("Resumo parcial: o percurso ultrapassou o limite de amostras e mostra a parte mais recente.",
+                                            color = Muted, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    Box(Modifier.fillMaxWidth().height(12.dp).background(
+                                        Brush.horizontalGradient(listOf(Color.Black,
+                                        Color(android.graphics.Color.parseColor(TracePresentation.color(trace.activity.brightKmh / 2, trace.activity.brightKmh, trace.activity.stopKmh, LocalExplorerTheme.current))),
+                                        themeColor(LocalExplorerTheme.current.traceLight))), RoundedCornerShape(6.dp)))
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("0 km/h", color = Muted, fontSize = 11.sp)
+                                        Text("${(trace.activity.brightKmh / 2).toInt()} km/h", color = Muted, fontSize = 11.sp)
+                                        Text("${trace.activity.brightKmh.toInt()}+ km/h", color = Muted, fontSize = 11.sp)
+                                    }
+                                    Text("Preto: parado (até ${trace.activity.stopKmh} km/h). Escuro: lento. Claro: mais rápido. Cinza: velocidade não estimada.", color = Muted,
+                                        style = MaterialTheme.typography.bodySmall)
+                                    val stoppedSeconds = currentSummary?.stoppedSeconds?.toInt() ?: 0
+                                    Text("${currentSummary?.stops ?: 0} paradas detectadas • ${stoppedSeconds / 60} min ${stoppedSeconds % 60} s",
+                                        color = Mint, style = MaterialTheme.typography.labelLarge)
+                                    Text("Paradas de pelo menos 5 segundos entram no resumo. O rastro fica preto, sem círculos. A velocidade não confirma congestionamento.",
+                                        color = Muted, style = MaterialTheme.typography.bodySmall)
+                                    OutlinedButton(onClick = { onTraceVisibleChange(true); onTraceFocus(); menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
+                                        Text("Enquadrar percurso")
+                                    }
+                                }
+                            }
                         }
                     }
-                }
-            }
-            HorizontalDivider(color = Track)
-            Text("Rever e guardar", style = MaterialTheme.typography.titleMedium)
-            Text("Replay e comparação não alteram suas descobertas. Datas antigas ficam desconhecidas. Viagens antigas podem ter apenas replay da linha, sem a ordem de revelação. Sem áreas novas registradas, antes e depois ficam iguais. Pausas e falhas de sinal são respeitadas.", color = Muted,
-                style = MaterialTheme.typography.bodySmall)
-            if (!state.active) {
-                OutlinedButton(onClick = { presentationIndex = MapPresentation.EPOCHS.ordinal; playing = false; menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Mapa das primeiras vezes")
-                }
-                if (trace != null && trace.samples.isNotEmpty()) {
-                    OutlinedButton(onClick = { onTraceVisibleChange(true); onTraceFocus(); comparison = .5f; presentationIndex = MapPresentation.COMPARE.ordinal; playing = false; menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Comparar antes e depois")
-                    }
-                    OutlinedButton(onClick = { onTraceVisibleChange(true); replayFraction = 0f; presentationIndex = MapPresentation.REPLAY.ordinal; playing = true; menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Replay do último percurso")
-                    }
-                    Button(onClick = { playing = false; cardOpen = true; menuOpen = false }, enabled = !storageBusy, modifier = Modifier.fillMaxWidth()) {
-                        Text("Criar cartão e exportar animação")
-                    }
-                }
-            } else Text("Encerre a viagem para rever e exportar.", color = Muted)
-            if (trace != null && !state.active) OutlinedButton(onClick = { summaryOpen = true; menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
-                Text("Abrir resumo do percurso")
-            }
-            HorizontalDivider(color = Track)
-            Text("Backup das descobertas", style = MaterialTheme.typography.titleMedium)
-            Text("Exporta a exploração real, sem o último rastro nem a simulação. Restaurar mescla as descobertas sem apagar as atuais. O arquivo contém lugares que você visitou; escolha onde guardá-lo.",
-                color = Muted, style = MaterialTheme.typography.bodySmall)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onExport, enabled = !state.active && !storageBusy, modifier = Modifier.weight(1f)) { Text("Exportar") }
-                OutlinedButton(onClick = onImport, enabled = !state.active && !storageBusy, modifier = Modifier.weight(1f)) { Text("Restaurar") }
-            }
-            if (state.active) Text("Encerre o percurso para usar o backup.", color = Muted, style = MaterialTheme.typography.bodySmall)
-            if (storageMessage.isNotEmpty()) Text(storageMessage, color = Mint, style = MaterialTheme.typography.bodySmall)
+                    if (menuSection == 3) {
+                        ThemePicker(onThemeChange)
+                        Text("Intensidade da névoa • ${(fogOpacity * 100).toInt()}%", style = MaterialTheme.typography.titleMedium)
+                        Slider(value = fogOpacity, onValueChange = onFogOpacityChange, valueRange = .2f.. .8f)
+                        if (!state.active && trace != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Destacar áreas novas", style = MaterialTheme.typography.bodyMedium)
+                                Text("Dourado • último percurso • por 2 minutos", color = Muted, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Switch(checked = highlight, onCheckedChange = onHighlightChange)
+                        }
+                        Text("Backup das descobertas", style = MaterialTheme.typography.titleMedium)
+                        Text("Exporta a exploração real, sem o último rastro nem a simulação. Restaurar mescla as descobertas sem apagar as atuais. O arquivo contém lugares que você visitou; escolha onde guardá-lo.",
+                            color = Muted, style = MaterialTheme.typography.bodySmall)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = onExport, enabled = !state.active && !storageBusy, modifier = Modifier.weight(1f)) { Text("Exportar") }
+                            OutlinedButton(onClick = onImport, enabled = !state.active && !storageBusy, modifier = Modifier.weight(1f)) { Text("Restaurar") }
+                        }
+                        if (state.active) Text("Encerre o percurso para usar o backup.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                        if (storageMessage.isNotEmpty()) Text(storageMessage, color = Mint, style = MaterialTheme.typography.bodySmall)
 
-            if (mapStatus.isNotEmpty()) {
-                Text("Mapa", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text(mapStatus, color = Muted, style = MaterialTheme.typography.bodySmall)
-                if (worldMap.configured) OutlinedButton(onClick = { worldMap.reload() }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Tentar carregar mapa")
-                }
-            }
-            HorizontalDivider(color = Track)
-            Text("Localização", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            if (!simulatedView && state.paused) Text("Gravação pausada; as atualizações GPS do percurso estão suspensas.", color = Mint)
-            if (!simulatedView && !state.paused) {
-                Text(gpsSignal.label + (gpsSignal.accuracyMeters?.let { " • precisão estimada de ${it.toInt()} m" } ?: ""),
-                    color = if (gpsSignal.quality == GpsQuality.GOOD) Mint else Color(0xFFFFD589))
-                Text("O círculo azul representa a incerteza informada pelo GPS, não a área revelada. Leituras acima de 20 m não revelam o mapa.",
-                    color = Muted, style = MaterialTheme.typography.bodySmall)
-            }
-            Text(if (precise) "Localização precisa autorizada" else "Autorize a localização precisa para revelar o caminho", color = Muted,
-                style = MaterialTheme.typography.bodySmall)
-            if (state.active) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                    Text("Acompanhar minha posição", style = MaterialTheme.typography.bodyMedium)
-                    Text("Mover o mapa pausa o acompanhamento", color = Muted, style = MaterialTheme.typography.bodySmall)
-                }
-                Switch(checked = following, onCheckedChange = onFollowingChange)
-            }
-            if (!precise && !state.active && !simulatedView) Button(onClick = onLocationPermission, modifier = Modifier.fillMaxWidth()) {
-                Text("Permitir localização")
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onGpsSettings, modifier = Modifier.weight(1f)) { Text("Ajustar GPS") }
-                OutlinedButton(onClick = onAppSettings, modifier = Modifier.weight(1f)) { Text("Permissões") }
-            }
-            if (BuildConfig.DEBUG) {
-                HorizontalDivider(color = Track)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text("Trajeto simulado", style = MaterialTheme.typography.titleMedium)
-                        Text("Ruas de São Paulo • reprodução 8× • velocidades e paradas variadas", color = Muted, style = MaterialTheme.typography.bodySmall)
+                        if (mapStatus.isNotEmpty()) {
+                            Text("Mapa", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Text(mapStatus, color = Muted, style = MaterialTheme.typography.bodySmall)
+                            if (worldMap.configured) OutlinedButton(onClick = { worldMap.reload() }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Tentar carregar mapa")
+                            }
+                        }
+                        HorizontalDivider(color = Track)
+                        Text("Localização", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        if (!simulatedView && state.paused) Text("Gravação pausada; as atualizações GPS do percurso estão suspensas.", color = Mint)
+                        if (!simulatedView && !state.paused) {
+                            Text(gpsSignal.label + (gpsSignal.accuracyMeters?.let { " • precisão estimada de ${it.toInt()} m" } ?: ""),
+                                color = if (gpsSignal.quality == GpsQuality.GOOD) Mint else Color(0xFFFFD589))
+                            Text("O círculo azul representa a incerteza informada pelo GPS, não a área revelada. Leituras acima de 20 m não revelam o mapa.",
+                                color = Muted, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(if (precise) "Localização precisa autorizada" else "Autorize a localização precisa para revelar o caminho", color = Muted,
+                            style = MaterialTheme.typography.bodySmall)
+                        if (state.active) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text("Acompanhar minha posição", style = MaterialTheme.typography.bodyMedium)
+                                Text("Mover o mapa pausa o acompanhamento", color = Muted, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Switch(checked = following, onCheckedChange = onFollowingChange)
+                        }
+                        if (!precise && !state.active && !simulatedView) Button(onClick = onLocationPermission, modifier = Modifier.fillMaxWidth()) {
+                            Text("Permitir localização")
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = onGpsSettings, modifier = Modifier.weight(1f)) { Text("Ajustar GPS") }
+                            OutlinedButton(onClick = onAppSettings, modifier = Modifier.weight(1f)) { Text("Permissões") }
+                        }
+                        if (BuildConfig.DEBUG) {
+                            HorizontalDivider(color = Track)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                                    Text("Trajeto simulado", style = MaterialTheme.typography.titleMedium)
+                                    Text("Ruas de Curitiba • reprodução rápida • velocidades e paradas variadas", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                }
+                                Switch(checked = simulatedView, onCheckedChange = onSimulationChange, enabled = !state.active)
+                            }
+                            if (state.active) Text("Encerre a exploração para trocar de modo.", color = Muted,
+                                style = MaterialTheme.typography.bodySmall)
+                            if (simulatedView) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                SimulationScenario.entries.forEach { option ->
+                                    FilterChip(selected = scenario == option, enabled = !state.active && !storageBusy,
+                                        onClick = { onScenarioChange(option) }, label = { Text(option.label) })
+                                }
+                            }
+                        }
                     }
-                    Switch(checked = simulatedView, onCheckedChange = onSimulationChange, enabled = !state.active)
-                }
-                if (state.active) Text("Encerre a exploração para trocar de modo.", color = Muted,
-                    style = MaterialTheme.typography.bodySmall)
-                if (simulatedView) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SimulationScenario.entries.forEach { option ->
-                        FilterChip(selected = scenario == option, enabled = !state.active && !storageBusy,
-                            onClick = { onScenarioChange(option) }, label = { Text(option.label) })
-                    }
+                    Text("Prepare seu percurso antes de sair. Durante a atividade, o app funciona de forma passiva.", color = Muted,
+                        style = MaterialTheme.typography.bodySmall)
+                    Text("Expo World  ${BuildConfig.VERSION_NAME}", color = Muted.copy(alpha = .7f), style = MaterialTheme.typography.labelSmall)
                 }
             }
-            Button(onClick = { onTripToggle(); menuOpen = false }, enabled = !storageBusy, colors = actionColors, shape = RoundedCornerShape(18.dp),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) { Text(actionLabel, fontWeight = FontWeight.SemiBold) }
-            Text("Prepare seu percurso antes de sair. Durante a atividade, o app funciona de forma passiva.", color = Muted,
-                style = MaterialTheme.typography.bodySmall)
-            Text("Expo World  ${BuildConfig.VERSION_NAME}", color = Muted.copy(alpha = .7f), style = MaterialTheme.typography.labelSmall)
         }
     }
     if (summaryOpen && trace != null) AlertDialog(
@@ -612,7 +670,7 @@ fun ExplorationScreen(
                 else Canvas(Modifier.fillMaxWidth().aspectRatio(ExpeditionArt.WIDTH.toFloat() / ExpeditionArt.HEIGHT)) {
                     ExpeditionRenderer.draw(drawContext.canvas.nativeCanvas, art, size.width, size.height, map = cardMap?.bitmap)
                 }
-                Text("PNG e GIF incluem o mapa e o percurso, com as cores do seu tema. Internet é necessária para carregar o mapa. Os arquivos são salvos onde você escolher.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                Text("GIF em 720 × 960, com 100 quadros, cores adaptadas ao mapa e animação mais suave. PNG e GIF incluem o mapa e o percurso, com as cores do seu tema. Internet é necessária para carregar o mapa. Os arquivos são salvos onde você escolher.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = onCardExport, enabled = !storageBusy && cardMap != null, modifier = Modifier.weight(1f)) { Text("Salvar PNG") }
                     OutlinedButton(onClick = onAnimationExport, enabled = !storageBusy && cardMap != null, modifier = Modifier.weight(1f)) { Text("Salvar GIF") }
@@ -622,6 +680,15 @@ fun ExplorationScreen(
             }
         }
     }
+    if (confirmEnd && state.active) AlertDialog(
+        onDismissRequest = { confirmEnd = false },
+        title = { Text("Encerrar este percurso?") },
+        text = { Text("O registro será finalizado e suas descobertas serão mantidas. Se pretende continuar depois, use Pausar.") },
+        confirmButton = { TextButton(enabled = !storageBusy, onClick = {
+            confirmEnd = false; menuOpen = false; onTripToggle()
+        }) { Text("Sim, encerrar") } },
+        dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text("Continuar percurso") } }
+    )
 }
 
 @Composable

@@ -47,6 +47,78 @@ class ExpeditionArtTest {
             } finally { reader.dispose() }
         }
     }
+    @Test fun compressedGifSurvivesCodeWidthChangesAndDictionaryResets() {
+        val random = java.util.Random(42)
+        for (palette in listOf(ExpeditionGif.PALETTE, ExpeditionGif.MAP_PALETTE)) {
+            for (width in listOf(1, 2, 15, 16, 17, 254, 255, 256, 257, 511, 512, 720)) {
+                val height = if (width == 720) 180 else 3
+                val expected = ByteArray(width * height) { random.nextInt(palette.size).toByte() }
+                val out = ByteArrayOutputStream(); val gif = ExpeditionGif(out, width, height, palette)
+                gif.frame(expected, 10); gif.finish()
+                val image = ImageIO.read(ByteArrayInputStream(out.toByteArray()))
+                expected.forEachIndexed { i, value -> assertEquals("width=$width, palette=${palette.size}, pixel=$i",
+                    palette[value.toInt() and 255], image.getRGB(i % width, i / width) and 0xFFFFFF) }
+            }
+        }
+        val out = ByteArrayOutputStream(); val gif = ExpeditionGif(out, 720, 960, ExpeditionGif.MAP_PALETTE)
+        gif.frame(ByteArray(720 * 960) { 42 }); gif.finish()
+        assertTrue("Repeated map areas must compress well", out.size() < 720 * 960 / 20)
+    }
+
+    @Test fun fullSizeAnimationHasOneHundredFramesAndCorrectTiming() {
+        val width = 720; val height = 960
+        val out = ByteArrayOutputStream(); val gif = ExpeditionGif(out, width, height, ExpeditionGif.MAP_PALETTE)
+        val pixels = ByteArray(width * height) { ((it / width / 8 + it % width / 12) % 200).toByte() }
+        repeat(100) { frame ->
+            pixels[frame * width + frame] = 255.toByte()
+            gif.frame(pixels, if (frame == 99) 150 else 10)
+        }
+        gif.finish()
+        ImageIO.createImageInputStream(ByteArrayInputStream(out.toByteArray())).use { input ->
+            val reader = ImageIO.getImageReadersByFormatName("gif").next(); reader.input = input
+            try {
+                assertEquals(100, reader.getNumImages(true))
+                var duration = 0
+                for (frame in 0 until 100) {
+                    val tree = reader.getImageMetadata(frame).getAsTree("javax_imageio_gif_image_1.0") as org.w3c.dom.Element
+                    val control = tree.getElementsByTagName("GraphicControlExtension").item(0) as org.w3c.dom.Element
+                    duration += control.getAttribute("delayTime").toInt()
+                }
+                assertEquals(1140, duration)
+                for (frame in listOf(0, 49, 99)) {
+                    val image = reader.read(frame)
+                    assertEquals(width, image.width); assertEquals(height, image.height)
+                    for (i in pixels.indices) {
+                        val row = i / width; val col = i % width
+                        val index = if (row == col && row <= frame) 255 else (row / 8 + col / 12) % 200
+                        assertEquals(ExpeditionGif.MAP_PALETTE[index], image.getRGB(col, row) and 0xFFFFFF)
+                    }
+                }
+            } finally { reader.dispose() }
+        }
+        assertTrue("Repeated map tiles must remain bounded", out.size() < 15_000_000)
+    }
+
+    @Test fun adaptivePalettePreservesUiColorsAndImprovesMapShades() {
+        // Representative muted map tones plus a theme gradient, rather than a uniform RGB cube.
+        val pixels = IntArray(32000) { i ->
+            val r = 140 + i % 100; val g = 150 + i % 90; val b = 120 + i % 110
+            (r shl 16) or (g shl 8) or b
+        } + intArrayOf(0, 0xFFFFFF, 0x101C22, 0xFFD166, ExplorerTheme.GREEN.accent)
+        val reserved = intArrayOf(0, 0xFFFFFF, 0x101C22, 0xFFD166, ExplorerTheme.GREEN.accent)
+        val palette = ExpeditionPalette.from(pixels, reserved)
+        val indexed = ByteArray(pixels.size); palette.index(pixels, indexed)
+        fun error(a: Int, b: Int): Long = listOf(16, 8, 0).sumOf { shift ->
+            val delta = (a ushr shift and 255) - (b ushr shift and 255); (delta * delta).toLong()
+        }
+        val adaptiveError = pixels.indices.sumOf { error(pixels[it], palette.colors[indexed[it].toInt() and 255]) }
+        val previousError = pixels.sumOf { error(it, ExpeditionGif.MAP_PALETTE[ExpeditionGif.mapIndex(it).toInt() and 255]) }
+        assertTrue("Adaptive map shades should beat RGB332", adaptiveError < previousError / 2)
+        reserved.forEachIndexed { i, color -> assertEquals(color, palette.colors[indexed[pixels.size - reserved.size + i].toInt() and 255]) }
+        val flat = ExpeditionPalette.from(IntArray(20) { 0x101C22 })
+        assertEquals(256, flat.colors.size)
+    }
+
     @Test fun mapCardUsesMapProjectionAttributionAndBlackStopsWithoutStopSymbols() {
         val samples = listOf(TraceSample(0, -25.43, -49.27, 0.0, 12.0, true, -1, 0.0),
             TraceSample(1, -25.431, -49.27, 5.0, 0.0, false, 0, 5.0),

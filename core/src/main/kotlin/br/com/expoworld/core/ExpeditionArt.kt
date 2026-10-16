@@ -97,8 +97,7 @@ object ExpeditionArt {
     }
 }
 
-/** GIF89a with a fixed 16-color palette. Clear often to bound the LZW dictionary
- * and keep every code at 5 bits. Larger output trades compression for low memory. */
+/** GIF89a, one global palette and bounded 12-bit LZW dictionary. Frames stream to disk. */
 class ExpeditionGif(private val out: OutputStream, val width: Int, val height: Int, private val palette: IntArray = PALETTE) {
     companion object {
         val PALETTE = intArrayOf(0x101C22, 0x1C3038, 0x0A1218, 0xFFFFFF, 0x70E1BA, 0xAFBFC6, 0xFFD166, 0x21404A,
@@ -111,7 +110,6 @@ class ExpeditionGif(private val out: OutputStream, val width: Int, val height: I
     private val paletteBits = Integer.numberOfTrailingZeros(palette.size)
     private val minimumCodeSize = maxOf(2, paletteBits)
     private val clearCode = 1 shl minimumCodeSize
-    private val codeBits = minimumCodeSize + 1
     private fun word(n: Int) { out.write(n and 255); out.write(n ushr 8 and 255) }
     init {
         require(palette.size == 16 || palette.size == 256)
@@ -127,12 +125,37 @@ class ExpeditionGif(private val out: OutputStream, val width: Int, val height: I
         out.write(byteArrayOf(0x21, 0xF9.toByte(), 4, 4)); word(delayCentiseconds.coerceIn(1, 65535)); out.write(0); out.write(0)
         out.write(0x2C); word(0); word(0); word(width); word(height); out.write(0); out.write(minimumCodeSize)
         val block = ByteArray(255); var used = 0; var bits = 0; var accumulator = 0
+        var codeBits = minimumCodeSize + 1
         fun byte(value: Int) { block[used++] = value.toByte(); if (used == 255) { out.write(255); out.write(block); used = 0 } }
         fun code(value: Int) { accumulator = accumulator or (value shl bits); bits += codeBits
             while (bits >= 8) { byte(accumulator and 255); accumulator = accumulator ushr 8; bits -= 8 }
         }
-        var at = 0
-        while (at < pixels.size) { code(clearCode); repeat(minOf(12, pixels.size - at)) { code(pixels[at++].toInt() and 255) } }
+        // Encoder dictionary is one entry ahead of the decoder: grow only after
+        // nextCode exceeds the boundary, so the next emitted code uses its width.
+        val dictionary = HashMap<Int, Int>(4096)
+        var nextCode = clearCode + 2
+        code(clearCode)
+        var prefix = pixels[0].toInt() and 255
+        for (at in 1 until pixels.size) {
+            val suffix = pixels[at].toInt() and 255
+            val key = (prefix shl 8) or suffix
+            val found = dictionary[key]
+            if (found != null) prefix = found
+            else {
+                code(prefix)
+                if (nextCode < 4096) {
+                    dictionary[key] = nextCode++
+                    if (nextCode > (1 shl codeBits) && codeBits < 12) codeBits++
+                } else {
+                    code(clearCode); dictionary.clear(); nextCode = clearCode + 2
+                    codeBits = minimumCodeSize + 1
+                }
+                prefix = suffix
+            }
+        }
+        code(prefix)
+        // Reading the final prefix may also grow the decoder's dictionary.
+        if (nextCode == (1 shl codeBits) && codeBits < 12) codeBits++
         code(clearCode + 1)
         if (bits > 0) byte(accumulator and 255)
         if (used > 0) { out.write(used); out.write(block, 0, used) }

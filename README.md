@@ -2,6 +2,19 @@
 
 Aplicativo nativo em Kotlin/Jetpack Compose que revela uma faixa ao redor do caminho percorrido. MapLibre Native exibe o mapa; Room preserva a exploração e o rastro por velocidade do último percurso. Interface em português do Brasil. Sem login, backend próprio, sincronização ou anúncios. Planejamento online de roteiros com orientações em texto, sem navegação por voz. Trajetos reais podem ser salvos localmente com título e consultados depois.
 
+## Interface e GIF — 0.6.1
+
+O menu tem quatro áreas, com os atalhos sempre visíveis e o conteúdo de cada área rolando separadamente:
+
+- **Explorar**: atividade, planejamento e controles da viagem.
+- **Bairros**: percentual de Curitiba, busca dos 75 bairros, área descoberta e visão geral.
+- **Trajetos**: resumo, replay, comparação, cartão PNG/GIF e trajetos salvos. Detalhes e cores do rastro ficam em uma seção expansível.
+- **Ajustes**: temas, névoa, backup, mapa, localização e simulação.
+
+**Planejar volta** e **Bairros • percentual** também ficam sobre o mapa antes de iniciar. Durante a viagem, o botão principal é **Pausar percurso** ou **Continuar percurso**. **Encerrar percurso** é uma ação separada, menor, e tanto ela quanto o botão do menu pedem confirmação. **Continuar percurso**, voltar ou tocar fora do aviso cancela o encerramento; a gravação mantém seu estado anterior. O aviso não pausa automaticamente. Confirmar encerra o registro e preserva as descobertas; o trajeto real continua podendo ser salvo com título.
+
+O GIF passou de 360×480/40 quadros para **720×960/100 quadros**, com antisserrilhamento, 10 quadros por segundo e pausa final de 1,5 s (11,4 s por ciclo). A paleta global de 256 cores é calculada a partir do cartão completo, incluindo o mapa e as cores do tema, e reutilizada em todos os quadros para evitar oscilações de cor. Preto e cores essenciais têm prioridade. Compressão LZW com dicionário limitado substitui os resets a cada 12 pixels; isso contém o tamanho do arquivo apesar da maior definição. Só um bitmap e buffers de pixels são mantidos para a animação, fora da interface. O formato GIF continua limitado a 256 cores e exportar pode levar mais tempo em celulares modestos. O banco e os dados existentes não mudam nesta versão.
+
 ## Versão unificada 0.5.1 — 16/10/2026
 
 Integra as branches de bairros/temas e replay/exportação na `main`. Preserva backup, visão geral, pausa, primeiras descobertas, comparação, replay, trajetos com título, modalidades e temas. Retorna o percentual por bairro ao menu, remove a camada de bolinhas de parada e inclui o mapa-base na prévia, PNG e GIF. O banco 7 normaliza as estruturas divergentes das versões 4/5 e preserva os dados das duas linhas de desenvolvimento. Nesta entrega o usuário autorizou explicitamente integração direta na `main`, sem novo PR.
@@ -22,13 +35,13 @@ Sem chave/URL de estilo, há um fundo neutro com orientação clara. Ele permite
 python scripts/check_migration_sql.py
 ```
 
-O APK, quando compilado, fica em `app/build/outputs/apk/debug/app-debug.apk`. A entrega atual também está em `dist/expo-world-0.6.0-debug.apk`. O teste conectado exige um Android conectado por ADB ou emulador iniciado. A verificação Python usa a biblioteca padrão para testar o SQL das migrações em SQLite do computador, sem substituir o teste Room no Android. Relatórios: `core/build/reports/tests/test/index.html` e `app/build/reports/lint-results-debug.html`.
+O APK, quando compilado, fica em `app/build/outputs/apk/debug/app-debug.apk`. A entrega atual também está em `dist/expo-world-0.6.1-debug.apk`. O teste conectado exige um Android conectado por ADB ou emulador iniciado. A verificação Python usa a biblioteca padrão para testar o SQL das migrações em SQLite do computador, sem substituir o teste Room no Android. Relatórios: `core/build/reports/tests/test/index.html` e `app/build/reports/lint-results-debug.html`.
 
 `scripts/bootstrap-build.ps1` pode baixar JDK 17 em `.tools` e executar a compilação, sem alterar a instalação de Java do sistema. `-InstallAndroidSdk` também instala ferramentas Android locais e apresenta as licenças do SDK para revisão/aceitação. O script precisa de acesso à internet; downloads e caches não são versionados. Se já tiver SDK instalado, defina `ANDROID_HOME` ou `sdk.dir`. A primeira execução baixa o Gradle e as dependências.
 
 ## Uso em aparelho
 
-Na versão 0.5.1 o mapa ocupa a tela inteira, com controles flutuantes e névoa mais suave. O botão de menu (três linhas, no alto à direita) abre um painel com progresso, resumo do percurso, estado do GPS, rastro por velocidade, permissões e modo simulado. Toque fora do painel, deslize-o para baixo ou use o botão de fechar para voltar ao mapa. O botão com uma mira centraliza sua posição; iniciar/encerrar continua acessível sobre o mapa. A atribuição permanece visível com o menu fechado.
+Na versão 0.5.1 o mapa ocupa a tela inteira, com controles flutuantes e névoa mais suave. O botão de menu (três linhas, no alto à direita) abre as áreas Explorar, Bairros, Trajetos e Ajustes. Toque fora do painel, deslize-o para baixo ou use o botão de fechar para voltar ao mapa. O botão com uma mira centraliza sua posição; iniciar/encerrar continua acessível sobre o mapa. A atribuição permanece visível com o menu fechado.
 
 Ao iniciar, o mapa acompanha a posição com transições de câmera. Mover ou girar o mapa com os dedos pausa esse acompanhamento; a mira retoma-o. O menu oferece **Acompanhar minha posição**. Isso só movimenta a câmera: não fornece navegação nem instruções de direção.
 
@@ -36,7 +49,7 @@ O aviso **Sem internet** distingue a conexão do sinal GPS. O registro local con
 
 ## Exploração de bolso — 0.6.0
 
-Menu → **Exploração de bolso • planejar uma volta**. Escolha de 10 a 180 minutos (atalhos 15/30/45/60), caminhada/bicicleta/carro e **Explorar** ou **Passear**. A partida pode ser a posição GPS recente ou um ponto tocado no mapa. **Voltar ao início** vem marcado: a ida e a volta entram no orçamento de tempo; desmarcar permite terminar em outro lugar.
+Menu → **Explorar** → **Exploração de bolso • planejar uma volta**. Escolha de 10 a 180 minutos (atalhos 15/30/45/60), caminhada/bicicleta/carro e **Explorar** ou **Passear**. A partida pode ser a posição GPS recente ou um ponto tocado no mapa. **Voltar ao início** vem marcado: a ida e a volta entram no orçamento de tempo; desmarcar permite terminar em outro lugar.
 
 **Explorar** compara até três percursos e favorece quilômetros únicos ainda não reconhecidos na base de Curitiba. A escolha de pontos intermediários também favorece ruas com partes ainda não visitadas. O reconhecimento/estimativa ocorre no aparelho; não envia créditos, névoa ou histórico ao roteador. Fora da área coberta, ainda há planejamento, com indicação de que a estimativa de descoberta está indisponível. **Passear** dá mais peso à duração, continuidade, menor repetição e menos mudanças de direção. As opções do roteador reduzem preferência por subidas a pé/bike e por rodovias/pedágios no carro; não garantem percurso plano, agradável, seguro ou sem pedágios.
 
@@ -58,7 +71,7 @@ Verificação manual: gere uma caminhada com retorno e uma sem retorno; escolha 
 
 ## Temas
 
-Abra o menu e escolha **Temas**: **Verdinho (padrão original)**, **Azul**, **Vermelho**, **Rosa**, **Amarelo**, **Branco** ou **Preto**. Cada tema combina interface, Palio, pedestre/bicicleta, destaque dos bairros e degradê do rastro. Branco usa interface clara; os demais usam fundos escuros com a cor escolhida. Não há seletor de cores individuais.
+Abra **Menu → Ajustes → Temas**: **Verdinho (padrão original)**, **Azul**, **Vermelho**, **Rosa**, **Amarelo**, **Branco** ou **Preto**. Cada tema combina interface, Palio, pedestre/bicicleta, destaque dos bairros e degradê do rastro. Branco usa interface clara; os demais usam fundos escuros com a cor escolhida. Não há seletor de cores individuais.
 
 A escolha muda imediatamente e fica salva nas preferências locais, inclusive após fechar/reabrir. Sem preferência válida, o app mantém o verdinho original, incluindo pintura e degradê anteriores. O tema também se aplica à visualização dos trajetos salvos, sem alterar suas amostras, quilômetros ou modalidade. Paradas continuam pretas, sem bolinhas; velocidade desconhecida continua cinza. Não altera a base de mapas do provedor nem separa o progresso. Nenhuma migração ou limpeza do banco é necessária.
 
@@ -68,7 +81,7 @@ A escolha muda imediatamente e fica salva nas preferências locais, inclusive ap
 
 O menu permite escolher **Carro**, **Caminhada** ou **Bicicleta** antes de iniciar. Durante o registro a atividade fica bloqueada. Cada percurso e sua cópia salva guardam a modalidade; caminhadas mostram ritmo médio em min/km, bicicletas e carros em km/h. As escalas de cores, limites de plausibilidade e detecção de parada são adequados à atividade. O marcador é um pedestre ou bicicleta em pixel art nesses modos; em carro continua o Palio verde, apontando para o rumo do deslocamento.
 
-Logo abaixo do seletor de atividade, o painel **Curitiba • ruas exploradas** mostra o percentual geral e uma prévia de bairros, mesmo antes de obter GPS. Ele identifica o bairro da posição atual e apresenta quilômetros percorridos únicos, total estimado de vias elegíveis e percentual por bairro. **Ver os 75 bairros** abre a lista com busca; tocar num bairro enquadra seus limites e o destaca no mapa. Fora de Curitiba o GPS, a névoa e os trajetos continuam funcionando, mas esta base não concede progresso de ruas.
+Em **Menu → Bairros**, o painel **Curitiba • ruas exploradas** mostra o percentual geral e uma prévia de bairros, mesmo antes de obter GPS. Ele identifica o bairro da posição atual e apresenta quilômetros percorridos únicos, total estimado de vias elegíveis e percentual por bairro. **Ver os 75 bairros** abre a lista com busca; tocar num bairro enquadra seus limites e o destaca no mapa. Fora de Curitiba o GPS, a névoa e os trajetos continuam funcionando, mas esta base não concede progresso de ruas.
 
 Os limites vêm da [Malha Censitária IBGE 2022](https://www.ibge.gov.br/geociencias/organizacao-do-territorio/malhas-territoriais/26565-malhasde-setores-censitarios-divisoes-intramunicipais.html), município 4106902, referência territorial 31/07/2022. O [diretório oficial](https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_de_setores_censitarios__divisoes_intramunicipais/censo_2022/bairros/shp/UF/) disponibiliza os arquivos como públicos. Há limites mais recentes no IPPUC, mas não afirmamos que este recorte censitário representa todas as mudanças legais posteriores.
 
@@ -103,25 +116,25 @@ O resumo do rastro mostra distância registrada, tempo entre registros, duraçã
 
 O mapa começa no centro de **Curitiba** (-25.4284, -49.2733). A primeira localização real válida ainda pode centralizar no aparelho. Um rastro antigo não muda automaticamente a cidade ao abrir; use Enquadrar percurso para vê-lo. O enquadramento automático permanece ao encerrar uma nova viagem.
 
-### Replay do último percurso
+### Reproduzir percurso selecionado
 
-Depois de encerrar, abra Menu → Rever e guardar → Replay do último percurso. Há reprodução/pausa, busca pela barra e Sair. O replay comprime o período registrado em cerca de 12 segundos, mantém as cores de velocidade e um marcador dourado. Não interpola entre segmentos separados por falta de GPS, pausa ou antimeridiano. Ao sair do primeiro plano, a reprodução pausa. Não inicia serviço, não solicita GPS adicional e não grava exploração.
+Depois de encerrar, abra Menu → Trajetos → Reproduzir percurso selecionado. Há reprodução/pausa, busca pela barra e Sair. O replay comprime o período registrado em cerca de 12 segundos, mantém as cores de velocidade e um marcador dourado. Não interpola entre segmentos separados por falta de GPS, pausa ou antimeridiano. Ao sair do primeiro plano, a reprodução pausa. Não inicia serviço, não solicita GPS adicional e não grava exploração.
 
 Em viagens iniciadas nesta versão, cada célula nova guarda seu tempo relativo no percurso. No detalhe, a névoa reaparece e se abre na ordem das descobertas. A animação usa um snapshot do viewport e trabalho fora da interface, com no máximo 20 mil células para animar a névoa; em áreas maiores ou viagens sem tempos conhecidos, o replay da linha continua, com a névoa final. Em zoom menor que 12, continua a cobertura aproximada da visão geral. Aproximar permite consultar o detalhe. Rastros limitados a 20 mil amostras têm replay parcial, começando no primeiro ponto retido.
 
 ### Antes e depois
 
-Menu → Comparar antes e depois. A barra move uma divisória vertical: à esquerda a névoa cobre novamente as áreas novas da última viagem; à direita aparece o estado atual. Mover/rotacionar o mapa atualiza o recorte geográfico. Os modos replay, comparação e épocas são exclusivos, e começar uma viagem sai deles.
+Menu → Trajetos → Comparar antes e depois. A barra move uma divisória vertical: à esquerda a névoa cobre novamente as áreas novas da última viagem; à direita aparece o estado atual. Mover/rotacionar o mapa atualiza o recorte geográfico. Os modos replay, comparação e épocas são exclusivos, e começar uma viagem sai deles.
 
 A comparação usa a diferença das células novas do último percurso, disponível a partir da 0.4.0. Ela não altera o banco. Viagens sem áreas novas/sem identificação das células podem mostrar os lados iguais. Não é um histórico de snapshots globais: importações de backup posteriores à viagem aparecem nos dois lados. A comparação detalhada requer zoom/quantidade de células dentro do limite da névoa; junto ao antimeridiano, o recorte pode ser omitido para evitar polígonos inválidos.
 
 ### Cartão e animação para salvar
 
-Menu → Criar cartão e exportar animação. Escolha um título de até 40 caracteres e confira a prévia. **Salvar PNG** cria um cartão de 1080×1440, com percurso, data, distância, área nova, tempo e paradas. Percursos simulados, interrompidos ou parciais são identificados. **Salvar GIF** cria uma animação ilustrada do trajeto em 360×480, 40 quadros e paleta de 256 cores, com cerca de 11 segundos por ciclo.
+Menu → Trajetos → Criar cartão e exportar animação. Escolha um título de até 40 caracteres e confira a prévia. **Salvar PNG** cria um cartão de 1080×1440, com percurso, data, distância, área nova, tempo e paradas. Percursos simulados, interrompidos ou parciais são identificados. **Salvar GIF** cria uma animação ilustrada do trajeto em 720×960, 100 quadros, 10 quadros/s e paleta adaptativa de 256 cores, com 11,4 segundos por ciclo.
 
 PNG e GIF incluem o mapa-base renderizado pelo MapLibre com o mesmo estilo configurado no aplicativo, além do rastro e da atribuição MapTiler/OpenStreetMap. O enquadramento considera o percurso inteiro, e a projeção do rastro usa o snapshot para manter alinhamento com as ruas. A prévia do cartão usa a mesma imagem e projeção; não é uma captura da tela atual nem inclui seus controles. Internet é necessária para carregar os dados cartográficos ainda não disponíveis. Falha ou tempo limite de 45 segundos mostra orientação para tentar novamente; não é gerado silenciosamente um cartão sem mapa. Os temas são preservados no rastro; paradas são segmentos pretos sem marcadores de parada. Os círculos de início e fim/posição do replay continuam identificando as extremidades.
 
-O seletor Android escolhe o destino, sem nova permissão de armazenamento ou upload automático. Os arquivos contêm o percurso sobre o mapa. A imagem de fundo é renderizada uma vez e reutilizada nos 40 quadros; codificação e buffers ficam fora da interface, com cancelamento e arquivos temporários removidos. A exportação não inclui a animação da névoa: ela continua disponível no replay dentro do mapa. Durante a exportação, iniciar outra viagem fica bloqueado. As prévias JVM em `core/build/preview` verificam layout e desenho vetorial, sem acesso ao mapa real.
+O seletor Android escolhe o destino, sem nova permissão de armazenamento ou upload automático. Os arquivos contêm o percurso sobre o mapa. A imagem de fundo é renderizada uma vez e reutilizada nos 100 quadros; codificação e buffers ficam fora da interface, com cancelamento e arquivos temporários removidos. A exportação não inclui a animação da névoa: ela continua disponível no replay dentro do mapa. Durante a exportação, iniciar outra viagem fica bloqueado. As prévias JVM em `core/build/preview` verificam layout e desenho vetorial, sem acesso ao mapa real.
 
 ### Mapa das primeiras vezes
 

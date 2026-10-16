@@ -17,8 +17,8 @@ android {
         applicationId = "br.com.expoworld"
         minSdk = 23
         targetSdk = 36
-        versionCode = 15
-        versionName = "0.6.0"
+        versionCode = 16
+        versionName = "0.6.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "MAPTILER_KEY", quoted(local.getProperty("MAPTILER_KEY", "")))
         buildConfigField("String", "MAP_STYLE_URL", quoted(local.getProperty("MAP_STYLE_URL", "")))

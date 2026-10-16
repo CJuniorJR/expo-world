@@ -1,3 +1,22 @@
+# Validação — 16/10/2026 — 0.6.1 — Interface e GIF
+
+- Menu dividido em Explorar, Bairros, Trajetos e Ajustes. Seletores fixos e conteúdo rolável independente; acesso direto a Planejar volta e Bairros no mapa. Replay, resumo, cartão e trajetos salvos aparecem antes dos detalhes expansíveis de velocidade.
+- Durante a viagem, Pausar/Continuar assume o botão principal. Encerrar fica separado e abre confirmação tanto no mapa como no menu; dispensar o aviso mantém o estado da gravação. A confirmação é apresentada sobre os outros painéis. Não altera o serviço de GPS, as ações da notificação, o banco nem o tema escolhido.
+- GIF 720×960, 100 quadros a 10 qps, pausa final de 1,5 s e ciclo de 11,4 s. Antisserrilhamento, paleta adaptativa global de 256 cores (estável, com preto e cores essenciais reservados) e LZW com dicionário limitado a 4096 entradas. Mesmo mapa/projeção do PNG, um bitmap de animação reutilizado e codificação fora da interface.
+
+## Verificações
+
+- **80 testes JVM aprovados**, zero falhas/erros/ignorados. Três novos: mudanças de largura dos códigos LZW e resets com pixels aleatórios nas paletas de 16/256 cores; redução do erro de cor em tons sintéticos de mapa e preservação das cores essenciais; GIF completo de 100 quadros em 720×960 lido por ImageIO, com dimensões, todos os pixels dos quadros 0/49/99 e duração de todos os quadros conferidos.
+- Os testes de compressão incluem área uniforme em resolução final e limite de tamanho para uma animação sintética. Não representam benchmark de exportação Android nem medição com um mapa real.
+- `:core:test :app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest`: BUILD SUCCESSFUL. Lint: 0 erros, 34 avisos. Os 12 testes instrumentados anteriores compilaram, mas não foram executados: nenhum dispositivo listado por ADB.
+- Assets conferidos dentro do APK e `git diff --check` aprovado. Sem migração ou alteração na base offline; configurações locais, chave, caches e APK permanecem ignorados no Git.
+
+APK: `dist/expo-world-0.6.1-debug.apk`, versionCode 16, 65300893 bytes. SHA-256: `8FE2AFAAAFA674E07E820CE58E03845728427D2434BDD355814F33176D265149`.
+
+Entrega na main conforme autorização já existente. Pendentes no aparelho: legibilidade com fonte ampliada/tela pequena, troca das quatro áreas, confirmação/cancelamento no mapa e no menu, pausa/continuação e exportação PNG/GIF com mapas carregados. GIF continua limitado a 256 cores e pode demorar mais em celulares modestos. Não houve captura de tela Android nem teste real de GPS nesta rodada. Instalar como atualização, preservando dados.
+
+---
+
 # Validação — 16/10/2026 — 0.6.0 — Exploração de bolso
 
 - Implementados planejamento por tempo (10–180 min), Explorar/Passear, perfis caminhada/bicicleta/carro, partida GPS ou toque no mapa, circuitos com retorno incluído e roteiros abertos. Compara até três candidatos e tenta um ajuste de duração. Explorar favorece mais quilômetros novos estimados; Passear favorece duração, continuidade e menos mudanças de direção, com opções de custo para menos subidas/rodovias.
