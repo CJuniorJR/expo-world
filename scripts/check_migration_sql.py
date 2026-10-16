@@ -105,4 +105,3 @@ assert db.execute("SELECT newAreaSquareMeters FROM route_sessions WHERE mode = '
 assert db.execute("SELECT COUNT(*) FROM cells WHERE mode = 'real' AND x = 202").fetchone() == (0,)
 db.close()
 print("PASS: migration 1->2->3->4 matches Room schema; preserves coverage, interrupted legacy route and unknown area; reopen, isolation, trimming, unique new area and transaction rollback (host SQLite).")
-

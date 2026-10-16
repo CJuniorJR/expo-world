@@ -135,4 +135,3 @@ class PersistenceTest {
         } finally { db.close() }
     }
 }
-

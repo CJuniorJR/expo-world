@@ -1,53 +1,55 @@
-# Validação — 14/10/2026 — versão 0.2.0
+# Validação — 15/10/2026 — versão 0.3.0
 
-## Resultado
-
-Executado com JDK 17, SDK Platform 36 e Build Tools 35.0.0:
+## Resultado executado
 
 ```text
 gradlew.bat :core:test :app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest --console=plain
 BUILD SUCCESSFUL
 ```
 
-- 35 testes JVM executados e aprovados: 19 de exploração, 11 de velocidade/rastro e 5 de progresso/resumo. Sem falhas, erros ou testes ignorados. Compilações posteriores reutilizaram resultados UP-TO-DATE.
-- Cobertura inclui distâncias e revelação, geometria arredondada, precisão e saltos incompatíveis com velocidade, lacunas, parada, rastro ao vivo, área conforme latitude, preservação de área na subdivisão e resumo sem conectar lacunas.
-- APK do app e APK dos testes Android compilados.
-- Lint: 0 erros, 11 avisos. Há aviso do compilador sobre callback legado de localização.
-- Assinatura verificada com apksigner: retorno 0. Certificado igual ao APK 0.1.3, permitindo atualização sem desinstalar.
-- aapt: pacote br.com.expoworld, versão 0.2.0, versionCode 5, mínimo API 23, alvo API 36.
+JDK 17, Gradle 8.13, SDK Platform 36 e Build Tools 35.0.0. A execução final levou 14 s; as compilações incrementais reutilizaram os resultados dos testes JVM executados nesta alteração.
 
-Entrega: dist/expo-world-0.2.0-debug.apk, 62.120.103 bytes.
+- **40 testes JVM aprovados**, sem falhas/erros/ignorados: 19 de exploração, 11 de velocidade/rastro, 5 de progresso/resumo, 3 de recuperação/divisão do rastro e 2 de sinal/círculo de precisão.
+- Novos testes verificam classificação de percurso interrompido, cobertura de todas as arestas ao dividir até 20 mil pontos em blocos, estabilidade do histórico entre blocos, ponta ao vivo limitada e lacunas; qualidade/expiração do GPS; círculo de precisão em metros em diferentes latitudes, fechamento e proteção no antimeridiano.
+- App e APK dos testes Android compilados.
+- **Lint: 0 erros, 11 avisos**. Sem atualização de dependências nesta versão.
+- scripts/check_migration_sql.py executado e aprovado: migrações 1→2→3→4 compatíveis com o schema Room 4; exploração positiva/negativa e percurso legado incompleto preservados, área antiga desconhecida, reabertura, isolamento, retenção, novas células sem duplicação e rollback de área/células.
+- A verificação Python usa SQLite do computador; não é execução de Room no Android. Room/KSP gerou o DAO com retorno de IDs do INSERT OR IGNORE e transação para células/área/amostra.
+- Assinatura do APK verificada com apksigner, retorno 0; mesmo certificado da versão 0.2.0.
+- aapt confirmou br.com.expoworld, versionCode 6, versionName 0.3.0, mínimo API 23, alvo API 36.
+
+## APK entregue
+
+`dist/expo-world-0.3.0-debug.apk` — 62.141.356 bytes.
 
 SHA-256:
 
 ```text
-BE33B003BDAA4AC645F382C98906CECEE6102187D463DBDC6C41CAAAD1101F0C
+A4F9F6223C190EBA7F812B7D74F6749162B1CC897037E46B6ADF1C3DA7E958E1
 ```
 
-## Persistência e migração
+Instalar como atualização, sem desinstalar. dist, local.properties, caches e ferramentas estão ignorados pelo Git. A chave do provedor não está no código versionado; o APK usa a configuração local existente.
 
-scripts/check_migration_sql.py executado e aprovado. Extrai o SQL das migrações reais 1→2→3, compara com o schema Room 3 e verifica preservação de células positivas/negativas, subdivisão em quatro células, isolamento real/simulado, reabertura em disco, retenção e rollback transacional.
+## Pendente no Android
 
-Esta verificação usa SQLite no computador. Room/KSP gerou os schemas e DAOs na compilação; não substitui testes de Room no Android.
+adb devices -l foi executado nesta entrega e não encontrou dispositivo. **Cinco testes instrumentados foram compilados, mas não executados.** O novo teste verifica percurso incompleto e área nova após reabertura do banco, repetição de células e zeragem da área numa viagem nova.
 
-Quatro testes instrumentados foram compilados, mas não executados. Cobrem persistência em disco, migração, retenção/isolamento e substituição atômica do percurso com snapshot ao vivo e progresso.
+Não houve abertura/instalação automatizada do aplicativo, captura visual Android ou teste de serviço em runtime. Conferir em aparelho:
 
-## Pendente no celular
+1. Atualizar preservando exploração e rastro antigo; área nova antiga deve ser indisponível.
+2. Iniciar viagem e conferir precisão em metros no mapa/menu e círculo azul. Perder sinal por mais de 10 s deve remover o círculo e indicar ausência de sinal recente.
+3. Conferir rastro e rupturas de sinal ao vivo; usar simulação para comparar trechos rápidos, lentos e parada.
+4. Encerrar e consultar área nova; repetir locais deve acrescentar apenas células antes desconhecidas, considerando variação do GPS.
+5. Forçar parada durante uma viagem com dados gravados e reabrir: exibir percurso interrompido e trecho salvo, sem reiniciar gravação. Últimas leituras não confirmadas podem faltar.
+6. Iniciar nova viagem sem pontos válidos e encerrar: preservar rastro anterior. Primeiro ponto válido de outra viagem substitui o anterior sem conectar os trajetos.
+7. Conferir bloqueio da tela, segundo plano, encerramento pela notificação, permissões, GPS desligado e falta de internet.
 
-Não houve instalação/abertura automatizada nem execução de connectedDebugAndroidTest. A última consulta ADB não encontrou aparelho conectado. Nenhuma captura Android desta versão foi produzida.
+## Limites conhecidos
 
-Verificar atualização preservando exploração; aparência e desempenho da névoa; rastro durante e depois da viagem; acompanhamento da câmera e gestos; resumo, marcos e simulação; GPS real, lacunas, bloqueio da tela, notificação, ausência de internet e permissões. Instalar como atualização, sem desinstalar, para preservar dados.
+A recuperação consulta o rastro persistido, sem retomar o serviço. START_NOT_STICKY permanece. Não há registro após parada forçada nem recuperação de leituras que só estavam em memória. Somente o último percurso de cada modo, até 20 mil amostras; área nova cobre a viagem inteira, mesmo quando o rastro é parcial.
 
-A filtragem mais rigorosa não melhora fisicamente o sensor GPS: rejeita pontos menos confiáveis e pode aumentar lacunas. A precisão e o comportamento em segundo plano dependem do aparelho e do Android.
+A otimização reduz reconstruções e uploads de geometria da ponta ao vivo; não foi feito benchmark de FPS, memória ou bateria em Android. Snapshots Room e cálculo de paradas ainda percorrem amostras persistidas. O histórico é reconstruído ao fechar bloco, recarregar estilo ou descartar pontos antigos pelo limite.
 
-## Provedor e ambiente
+Precisão é estimativa do sensor; leituras acima de 20 m continuam sem revelar exploração. O círculo não representa probabilidade garantida; é omitido para valores inválidos, acima de 10 km ou cruzando limites geográficos suportados. Simulação não valida GPS real ou segundo plano.
 
-A chave permanece em local.properties ignorado e é usada pelo APK. Uma consulta MapTiler foi bloqueada anteriormente pela revisão automática por ausência de autorização explícita para transmitir a chave. Nenhum teste HTTP com essa chave foi concluído no computador. Carregamento do mapa, cotas e restrições precisam ser conferidos no celular.
-
-JDK/SDK em .tools; cache Gradle em %TEMP%/expoworld-gradle. scripts/bootstrap-build.ps1 prepara o ambiente. APKs entregues ficam em dist, ignorado pelo Git.
-
-## Limites
-
-Faixa nominal de 50 m; grade de 10 m projetados, erro de discretização até cerca de 7,08 m. A abertura geométrica conservadora de 4 m arredonda bordas e pode reduzir pequenas regiões visíveis. Antialiasing ativado. Até 60 mil células por viewport, entre ±85° de latitude. Área exibida é estimada com correção por latitude.
-
-Somente o último percurso por modo, até 20 mil amostras. Velocidade suavizada, paradas e resumo aproximados; lentidão não identifica a causa do trânsito. Velocidade desconhecida fica cinza. Sem mapas offline completos ou recuperação automática após morte/parada forçada do processo. Internet indisponível não deve impedir o registro local, mas essa condição ainda requer teste Android.
+Faixa nominal de 50 m, grade de 10 m projetados, arredondamento conservador, até 60 mil células por viewport e latitude ±85°. Área total/nova são estimativas com correção por latitude. Sem mapas offline completos. Nenhuma consulta HTTP com a chave MapTiler foi executada no computador; carregamento, cotas e restrições dependem de teste no aparelho.

@@ -205,7 +205,7 @@ fun ExplorationScreen(
             HorizontalDivider(color = Color(0xFF2D414A))
             Text("Rastro por velocidade", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             if (trace?.isInterrupted(state.active) == true) Text(
-                "Recuperamos o trecho salvo antes da interrupção. O GPS está desligado; iniciar outra viagem substitui este rastro ao receber o primeiro ponto válido.",
+                "Recuperamos o trecho salvo antes da interrupção. A gravação está encerrada; iniciar outra viagem substitui este rastro ao receber o primeiro ponto válido.",
                 color = Color(0xFFFFD589), style = MaterialTheme.typography.bodySmall)
             if (trace != null) InfoCard(trace.newAreaSquareMeters?.let { areaLabel(it) } ?: "—",
                 if (trace.newAreaSquareMeters == null) "área nova indisponível neste percurso antigo" else "área nova neste percurso • estimativa",
