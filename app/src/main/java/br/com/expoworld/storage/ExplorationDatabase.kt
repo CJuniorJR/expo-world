@@ -19,6 +19,13 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 @Entity(tableName = "cells", primaryKeys = ["mode", "y", "x"])
 data class ExploredCell(val mode: String, val y: Int, val x: Int)
 
+@Entity(tableName = "trip_cells", primaryKeys = ["mode", "y", "x"])
+data class TripCell(val mode: String, val y: Int, val x: Int)
+
+data class CoverageBounds(val minX: Int?, val maxX: Int?, val minY: Int?, val maxY: Int?) {
+    fun domain(): CellBounds? = minX?.let { CellBounds(it, maxX!!, minY!!, maxY!!) }
+}
+
 @Entity(tableName = "route_sessions")
 data class RouteSession(@PrimaryKey val mode: String, val startedAtMillis: Long, val endedAtMillis: Long?, val completed: Boolean,
     @ColumnInfo(defaultValue = "NULL") val newAreaSquareMeters: Double? = null)
@@ -42,6 +49,18 @@ private fun TraceSample.toRow(mode: String) = RouteSampleRow(mode, sequence, lat
 
 @Dao
 interface ExplorationDao {
+    @Query("SELECT * FROM cells WHERE mode = 'real' AND (y > :afterY OR (y = :afterY AND x > :afterX)) ORDER BY y, x LIMIT 1024")
+    suspend fun exportPage(afterY: Int, afterX: Int): List<ExploredCell>
+    @Query("SELECT MIN(x) AS minX, MAX(x) AS maxX, MIN(y) AS minY, MAX(y) AS maxY FROM cells WHERE mode = :mode")
+    suspend fun extent(mode: String): CoverageBounds
+    @Query("SELECT MIN(x) AS minX, MAX(x) AS maxX, MIN(y) AS minY, MAX(y) AS maxY FROM cells WHERE mode = :mode AND y BETWEEN :minY AND :maxY AND x BETWEEN :minX AND :maxX GROUP BY (x - CASE WHEN x < 0 THEN :stride - 1 ELSE 0 END) / :stride, (y - CASE WHEN y < 0 THEN :stride - 1 ELSE 0 END) / :stride LIMIT 4001")
+    suspend fun coverage(mode: String, minX: Int, maxX: Int, minY: Int, maxY: Int, stride: Int): List<CoverageBounds>
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertTrip(cells: List<TripCell>)
+    @Query("DELETE FROM trip_cells WHERE mode = :mode")
+    suspend fun clearTrip(mode: String)
+    @Query("SELECT * FROM trip_cells WHERE mode = :mode AND y BETWEEN :minY AND :maxY AND x BETWEEN :minX AND :maxX LIMIT 60001")
+    suspend fun discoveries(mode: String, minX: Int, maxX: Int, minY: Int, maxY: Int): List<TripCell>
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(cells: List<ExploredCell>): List<Long>
     @Query("UPDATE route_sessions SET newAreaSquareMeters = newAreaSquareMeters + :area WHERE mode = :mode")
@@ -76,6 +95,7 @@ interface ExplorationDao {
     @Transaction
     suspend fun beginRoute(mode: String, startedAt: Long) {
         deleteSamples(mode)
+        clearTrip(mode)
         putSession(RouteSession(mode, startedAt, null, false, 0.0))
     }
     @Transaction
@@ -84,6 +104,7 @@ interface ExplorationDao {
         val inserted = insert(cells)
         val fresh = cells.filterIndexed { index, _ -> inserted[index] != -1L }
         if (fresh.isNotEmpty()) {
+            insertTrip(fresh.map { TripCell(it.mode, it.y, it.x) })
             val area = br.com.expoworld.core.ExplorationProgress.fromRows(
                 fresh.groupingBy { it.y }.eachCount().map { it.key to it.value.toLong() }).areaSquareMeters
             addNewArea(fresh.first().mode, area)
@@ -100,11 +121,11 @@ interface ExplorationDao {
     }
     @Transaction
     suspend fun resetSimulation() {
-        clearSimulation(); deleteSamples("simulation"); deleteSimulationSession()
+        clearSimulation(); clearTrip("simulation"); deleteSamples("simulation"); deleteSimulationSession()
     }
 }
 
-@Database(entities = [ExploredCell::class, RouteSession::class, RouteSampleRow::class], version = 4, exportSchema = true)
+@Database(entities = [ExploredCell::class, TripCell::class, RouteSession::class, RouteSampleRow::class], version = 5, exportSchema = true)
 abstract class ExplorationDatabase : RoomDatabase() { abstract fun cells(): ExplorationDao }
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -129,7 +150,26 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS trip_cells (mode TEXT NOT NULL, y INTEGER NOT NULL, x INTEGER NOT NULL, PRIMARY KEY(mode, y, x))")
+    }
+}
+
 class ExplorationRepository(private val dao: ExplorationDao) {
+    suspend fun extent(mode: String) = dao.extent(mode).domain()
+    suspend fun coverage(mode: String, bounds: CellBounds): List<CellBounds> {
+        var stride = 8
+        while (true) {
+            val rows = dao.coverage(mode, bounds.minX, bounds.maxX, bounds.minY, bounds.maxY, stride)
+            if (rows.size <= 4000) return rows.mapNotNull { it.domain() }
+            stride *= 2
+        }
+    }
+    suspend fun discoveries(mode: String, bounds: CellBounds): List<Cell> {
+        val cells = dao.discoveries(mode, bounds.minX, bounds.maxX, bounds.minY, bounds.maxY)
+        return if (cells.size > ExplorationConfig.MAX_VIEW_CELLS) emptyList() else cells.map { Cell(it.x, it.y) }
+    }
     suspend fun save(mode: String, cells: Set<Cell>) {
         // One Room transaction per accepted fix; committed before UI revision changes.
         dao.insert(cells.map { ExploredCell(mode, it.y, it.x) })

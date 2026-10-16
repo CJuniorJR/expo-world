@@ -12,11 +12,11 @@ from pathlib import Path
 root = Path(__file__).resolve().parent.parent
 schemas = root / "app/schemas/br.com.expoworld.storage.ExplorationDatabase"
 old_schema = json.loads((schemas / "1.json").read_text(encoding="utf-8"))
-new_schema = json.loads((schemas / "4.json").read_text(encoding="utf-8"))
+new_schema = json.loads((schemas / "5.json").read_text(encoding="utf-8"))
 source = (root / "app/src/main/java/br/com/expoworld/storage/ExplorationDatabase.kt").read_text(encoding="utf-8")
 migration = re.findall(r'db\.execSQL\("([^"\n]+)"\)', source)
 queries = re.findall(r'@Query\("([^"\n]+)"\)', source)
-assert len(migration) == 7
+assert len(migration) == 8
 
 def query(prefix):
     return next(q for q in queries if q.startswith(prefix))
@@ -52,6 +52,12 @@ for entity in new_schema["database"]["entities"]:
 expected_cells = {(0, 0), (0, 1), (1, 0), (1, 1), (-2, -2), (-2, -1), (-1, -2), (-1, -1)}
 assert set(db.execute("SELECT y, x FROM cells WHERE mode = 'real'").fetchall()) == expected_cells
 assert set(db.execute("SELECT y, x FROM cells WHERE mode = 'simulation'").fetchall()) == {(-6, 10), (-6, 11), (-5, 10), (-5, 11)}
+assert db.execute("SELECT COUNT(*) FROM trip_cells").fetchone() == (0,)
+# The actual grouping query must keep negative coordinates in floor-based bins.
+coverage_query = query("SELECT MIN(x) AS minX, MAX(x) AS maxX, MIN(y) AS minY, MAX(y) AS maxY FROM cells WHERE mode = :mode AND")
+coverage = db.execute(coverage_query, {"mode": "real", "minY": -100, "maxY": 100, "minX": -100, "maxX": 100, "stride": 8}).fetchall()
+assert set(coverage) == {(-2, -1, -2, -1), (0, 1, 0, 1)}
+assert len(db.execute(query("SELECT * FROM cells WHERE mode = 'real'"), {"afterY": -2147483648, "afterX": -2147483648}).fetchall()) == 8
 
 with db:
     db.execute("INSERT INTO route_sessions(mode, startedAtMillis, endedAtMillis, completed) VALUES ('real', 1000, NULL, 0)")
@@ -104,4 +110,4 @@ except RuntimeError:
 assert db.execute("SELECT newAreaSquareMeters FROM route_sessions WHERE mode = 'real'").fetchone() == (200.0,)
 assert db.execute("SELECT COUNT(*) FROM cells WHERE mode = 'real' AND x = 202").fetchone() == (0,)
 db.close()
-print("PASS: migration 1->2->3->4 matches Room schema; preserves coverage, interrupted legacy route and unknown area; reopen, isolation, trimming, unique new area and transaction rollback (host SQLite).")
+print("PASS: migration 1->2->3->4->5 matches Room schema; preserves cells/routes, empty legacy highlights, correct negative coverage grouping, export pagination, isolation, unique area and rollback (host SQLite).")

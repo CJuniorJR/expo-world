@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 data class TrackingState(
     val active: Boolean = false,
+    val paused: Boolean = false,
     val simulated: Boolean = false,
     val position: Fix? = null,
     val gpsFix: Fix? = null,
@@ -18,7 +19,8 @@ data class TrackingState(
 )
 
 class WorldApp : Application() {
+    var storageBusy = false
     val tracking = MutableStateFlow(TrackingState())
-    val database by lazy { Room.databaseBuilder(this, ExplorationDatabase::class.java, "exploration.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build() }
+    val database by lazy { Room.databaseBuilder(this, ExplorationDatabase::class.java, "exploration.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build() }
     val repository by lazy { ExplorationRepository(database.cells()) }
 }

@@ -13,6 +13,31 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PersistenceTest {
+    @Test fun highlightsTrackOnlyFreshCellsAndBackupMergeDoesNotReplaceRoute() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = Room.inMemoryDatabaseBuilder(context, ExplorationDatabase::class.java).build()
+        try {
+            val dao = db.cells(); val repo = ExplorationRepository(dao)
+            val bounds = CellBounds(-100, 100, -100, 100)
+            repo.save("real", setOf(Cell(-1, -1)))
+            val point = TraceSample(0, 0.0, 0.0, 0.0, 10.0, true, -1, 0.0)
+            repo.saveAccepted("real", setOf(Cell(-1, -1), Cell(0, 0)), point, 1000)
+            repo.saveAccepted("real", setOf(Cell(0, 0), Cell(1, 0)), null)
+            assertEquals(setOf(Cell(0, 0), Cell(1, 0)), repo.discoveries("real", bounds).toSet())
+            assertEquals(CellBounds(-1, 1, -1, 0), repo.extent("real"))
+            val saved = repo.route("real").first()
+            // Backup import calls insert directly, without beginning a trip.
+            assertEquals(1, dao.insert(listOf(ExploredCell("real", 0, 0), ExploredCell("real", 5, 5))).count { it != -1L })
+            assertEquals(saved, repo.route("real").first())
+            assertEquals(setOf(Cell(0, 0), Cell(1, 0)), repo.discoveries("real", bounds).toSet())
+            assertEquals(4, dao.exportPage(Int.MIN_VALUE, Int.MIN_VALUE).size)
+            repo.saveAccepted("simulation", setOf(Cell(8, 8)), point, 2000)
+            repo.clearSimulation()
+            assertEquals(setOf(Cell(0, 0), Cell(1, 0)), repo.discoveries("real", bounds).toSet())
+            repo.saveAccepted("real", setOf(Cell(5, 5)), point, 3000)
+            assertTrue(repo.discoveries("real", bounds).isEmpty())
+        } finally { db.close() }
+    }
     @Test fun interruptedRouteAndUniqueNewAreaSurviveReopen() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "interrupted-test.db"
@@ -43,7 +68,7 @@ class PersistenceTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "persistence-test.db"
         context.deleteDatabase(name)
-        fun open() = Room.databaseBuilder(context, ExplorationDatabase::class.java, name).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
+        fun open() = Room.databaseBuilder(context, ExplorationDatabase::class.java, name).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
         var db = open()
         try {
             val first = Fix(-23.5615, -46.6559, 5.0, 100.0)
@@ -86,7 +111,7 @@ class PersistenceTest {
         old.execSQL("INSERT INTO cells(mode, y, x) VALUES('real', ?, ?)", arrayOf(oldCell.y, oldCell.x))
         old.version = 1
         old.close()
-        val upgraded = Room.databaseBuilder(context, ExplorationDatabase::class.java, name).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
+        val upgraded = Room.databaseBuilder(context, ExplorationDatabase::class.java, name).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
         try {
             val repo = ExplorationRepository(upgraded.cells())
             assertEquals(expanded, repo.visible("real", Geo.bounds(-23.57, -46.67, -23.55, -46.64)).toSet())
