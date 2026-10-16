@@ -18,13 +18,13 @@ Sem chave/URL de estilo, há um fundo neutro com orientação clara. Ele permite
 python scripts/check_migration_sql.py
 ```
 
-O APK, quando compilado, fica em `app/build/outputs/apk/debug/app-debug.apk`. A entrega atual também está em `dist/expo-world-0.4.0-debug.apk`. O teste conectado exige um Android conectado por ADB ou emulador iniciado. A verificação Python usa a biblioteca padrão para testar o SQL das migrações em SQLite do computador, sem substituir o teste Room no Android. Relatórios: `core/build/reports/tests/test/index.html` e `app/build/reports/lint-results-debug.html`.
+O APK, quando compilado, fica em `app/build/outputs/apk/debug/app-debug.apk`. A entrega atual também está em `dist/expo-world-0.5.0-debug.apk`. O teste conectado exige um Android conectado por ADB ou emulador iniciado. A verificação Python usa a biblioteca padrão para testar o SQL das migrações em SQLite do computador, sem substituir o teste Room no Android. Relatórios: `core/build/reports/tests/test/index.html` e `app/build/reports/lint-results-debug.html`.
 
 `scripts/bootstrap-build.ps1` pode baixar JDK 17 em `.tools` e executar a compilação, sem alterar a instalação de Java do sistema. `-InstallAndroidSdk` também instala ferramentas Android locais e apresenta as licenças do SDK para revisão/aceitação. O script precisa de acesso à internet; downloads e caches não são versionados. Se já tiver SDK instalado, defina `ANDROID_HOME` ou `sdk.dir`. A primeira execução baixa o Gradle e as dependências.
 
 ## Uso em aparelho
 
-Na versão 0.4.0 o mapa ocupa a tela inteira, com controles flutuantes e névoa mais suave. O botão de menu (três linhas, no alto à direita) abre um painel com progresso, resumo do percurso, estado do GPS, rastro por velocidade, permissões e modo simulado. Toque fora do painel, deslize-o para baixo ou use o botão de fechar para voltar ao mapa. O botão com uma mira centraliza sua posição; iniciar/encerrar continua acessível sobre o mapa. A atribuição permanece visível com o menu fechado.
+Na versão 0.5.0 o mapa ocupa a tela inteira, com controles flutuantes e névoa mais suave. O botão de menu (três linhas, no alto à direita) abre um painel com progresso, resumo do percurso, estado do GPS, rastro por velocidade, permissões e modo simulado. Toque fora do painel, deslize-o para baixo ou use o botão de fechar para voltar ao mapa. O botão com uma mira centraliza sua posição; iniciar/encerrar continua acessível sobre o mapa. A atribuição permanece visível com o menu fechado.
 
 Ao iniciar, o mapa acompanha a posição com transições de câmera. Mover ou girar o mapa com os dedos pausa esse acompanhamento; a mira retoma-o. O menu oferece **Acompanhar minha posição**. Isso só movimenta a câmera: não fornece navegação nem instruções de direção.
 
@@ -36,7 +36,50 @@ O painel mostra uma estimativa da **área descoberta** em m²/km², calculada a 
 
 O resumo do rastro mostra distância registrada, tempo entre registros, duração aproximada parado e ritmo médio GPS. A distância ignora lacunas e deriva entre leituras do mesmo grupo de parada. A média usa as velocidades conhecidas ponderadas pelo tempo; velocidade desconhecida não vira zero. A aquisição inicial do GPS não faz parte do tempo entre registros. Se o limite de amostras foi ultrapassado, o resumo é marcado como parcial. São estimativas para explorar o mapa, não um odômetro ou medição precisa de trânsito.
 
-## Novidades da versão 0.4.0
+## Novidades da versão 0.5.0
+
+O mapa começa no centro de **Curitiba** (-25.4284, -49.2733). A primeira localização real válida ainda pode centralizar no aparelho. Um rastro antigo não muda automaticamente a cidade ao abrir; use Enquadrar percurso para vê-lo. O enquadramento automático permanece ao encerrar uma nova viagem.
+
+### Replay do último percurso
+
+Depois de encerrar, abra Menu → Rever e guardar → Replay do último percurso. Há reprodução/pausa, busca pela barra e Sair. O replay comprime o período registrado em cerca de 12 segundos, mantém as cores de velocidade e um marcador dourado. Não interpola entre segmentos separados por falta de GPS, pausa ou antimeridiano. Ao sair do primeiro plano, a reprodução pausa. Não inicia serviço, não solicita GPS adicional e não grava exploração.
+
+Em viagens iniciadas nesta versão, cada célula nova guarda seu tempo relativo no percurso. No detalhe, a névoa reaparece e se abre na ordem das descobertas. A animação usa um snapshot do viewport e trabalho fora da interface, com no máximo 20 mil células para animar a névoa; em áreas maiores ou viagens sem tempos conhecidos, o replay da linha continua, com a névoa final. Em zoom menor que 12, continua a cobertura aproximada da visão geral. Aproximar permite consultar o detalhe. Rastros limitados a 20 mil amostras têm replay parcial, começando no primeiro ponto retido.
+
+### Antes e depois
+
+Menu → Comparar antes e depois. A barra move uma divisória vertical: à esquerda a névoa cobre novamente as áreas novas da última viagem; à direita aparece o estado atual. Mover/rotacionar o mapa atualiza o recorte geográfico. Os modos replay, comparação e épocas são exclusivos, e começar uma viagem sai deles.
+
+A comparação usa a diferença das células novas do último percurso, disponível a partir da 0.4.0. Ela não altera o banco. Viagens sem áreas novas/sem identificação das células podem mostrar os lados iguais. Não é um histórico de snapshots globais: importações de backup posteriores à viagem aparecem nos dois lados. A comparação detalhada requer zoom/quantidade de células dentro do limite da névoa; junto ao antimeridiano, o recorte pode ser omitido para evitar polígonos inválidos.
+
+### Cartão e animação para salvar
+
+Menu → Criar cartão e exportar animação. Escolha um título de até 40 caracteres e confira a prévia. **Salvar PNG** cria um cartão de 1080×1440, com percurso, data, distância, área nova, tempo e paradas. Percursos simulados, interrompidos ou parciais são identificados. **Salvar GIF** cria uma animação ilustrada do trajeto em 360×480, 40 quadros e paleta de 16 cores, com cerca de 11 segundos por ciclo.
+
+PNG e GIF desenham o próprio traçado, sem ruas/tiles do provedor e sem captura do mapa-base. O replay dentro do mapa inclui a névoa quando há dados; o GIF é uma ilustração animada do cartão. O seletor Android escolhe o destino, sem nova permissão de armazenamento ou upload automático. Os arquivos contêm o formato do percurso. Processamento e buffers ficam fora da interface, usando um bitmap por vez. Durante a exportação, iniciar outra viagem fica bloqueado. O cartão usa Canvas nativo; a prévia de desenvolvimento em `core/build/preview` usa os mesmos comandos com fontes do computador e não é captura Android.
+
+### Mapa das primeiras vezes
+
+Menu → Mapa das primeiras vezes. No detalhe, dourado indica as células novas do último percurso; verde, as primeiras descobertas do mês atual; azul, descobertas anteriores ao mês; cinza, data desconhecida. O último percurso tem prioridade de cor. O mês usa o calendário/fuso do aparelho. Datas futuras ou ausentes são tratadas como desconhecidas na visualização. Repassar por um lugar não muda sua primeira data.
+
+A migração **5→6** preserva células/rastros e deixa datas/tempos antigos desconhecidos. Não se inventa quando uma área antiga foi visitada. O backup agora usa formato **2**, com a primeira data por célula; a restauração também aceita formato 1, cujas datas ficam desconhecidas. Duplicatas preservam a data já existente. Limites de 128 MB e 5 milhões de células valem simultaneamente na exportação e restauração. O backup continua sem rastro, tempo relativo do último percurso ou preferências.
+
+### Simulação com curvas em Curitiba
+
+O percurso normal agora acompanha uma polilinha conectada no centro de Curitiba: Avenida Marechal Floriano Peixoto, Rua André de Barros, Rua Barão do Rio Branco e Rua Pedro Ivo. Mantém cruzeiro, desaceleração, lentidão e parada; os cenários adversos usam o mesmo percurso. Iniciar outra simulação limpa apenas os dados simulados anteriores, incluindo datas e tempos. A geração é local e não depende da internet.
+
+As coordenadas foram obtidas numa consulta pequena à [API OpenStreetMap](https://api.openstreetmap.org/api/0.6/map?bbox=-49.275,-25.437,-49.267,-25.429). © OpenStreetMap contributors, sob [ODbL](https://www.openstreetmap.org/copyright). Os cartões simulados mantêm a atribuição. O traçado serve para testar geometria e velocidade; não é orientação de direção, não valida sentidos de trânsito nem oferece navegação. GIF89a segue a [especificação publicada](https://www.w3.org/Graphics/GIF/spec-gif89a.txt); GIF é marca de serviço da CompuServe Incorporated.
+
+### Conferência rápida
+
+1. Instale como atualização; confira Curitiba na abertura sem um GPS válido centralizando outra região.
+2. Rode uma **nova** simulação normal e encerre: confira curvas, resumo e destaque. Antes/depois deve esconder/repor as áreas novas sem alterar o total explorado.
+3. Reproduza e arraste a barra do replay. Repita com Túnel sem sinal ou Pausa: não deve surgir uma linha ligando as lacunas.
+4. Abra o mapa das primeiras vezes: as áreas da viagem nova ficam douradas; áreas antigas sem data continuam desconhecidas. Real e simulação não se misturam.
+5. Edite o título do cartão, salve PNG/GIF e abra os arquivos num visualizador. Confira acentos, SIMULADO, atribuição, animação e identificação de rastro parcial/interrompido.
+6. Exporte/restaure backup novo e antigo: não inventar datas antigas nem alterar a primeira data ao repetir a importação. Cancelar o seletor não deve alterar exploração.
+
+## Recursos da versão 0.4.0
 
 O menu reúne as novas funções, mantendo o mapa em tela inteira:
 
@@ -94,7 +137,7 @@ O serviço não reinicia automaticamente após morte do processo (`START_NOT_STI
 
 ## Trajeto simulado
 
-Disponível somente no build **debug**. Abra o menu, ative **Trajeto simulado** e toque em **Iniciar trajeto simulado**. Um trajeto de aproximadamente 1 km em São Paulo dura cerca de dois minutos e usa o mesmo filtro, rasterização, análise de velocidade e repositório do GPS. O indicador sobre o mapa e o painel identificam **MODO SIMULADO**.
+Disponível somente no build **debug**. Abra o menu, ative **Trajeto simulado** e toque em **Iniciar trajeto simulado**. Um trajeto de aproximadamente 1 km no centro de Curitiba dura cerca de dois minutos e usa o mesmo filtro, rasterização, análise de velocidade e repositório do GPS. O indicador sobre o mapa e o painel identificam **MODO SIMULADO**.
 
 Não exige permissão de localização. Os dados usam o namespace `simulation` no banco, separado de `real`; cada novo teste limpa somente a simulação. Ela é interrompida quando a tela sai do primeiro plano e não valida o serviço em segundo plano. Após encerrar, o mapa simulado pode ser consultado. A exploração real continua intacta ao voltar ao modo real.
 
