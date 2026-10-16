@@ -17,10 +17,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 @Entity(tableName = "cells", primaryKeys = ["mode", "y", "x"])
-data class ExploredCell(val mode: String, val y: Int, val x: Int)
+data class ExploredCell(val mode: String, val y: Int, val x: Int,
+    @ColumnInfo(defaultValue = "NULL") val firstDiscoveredAtMillis: Long? = null)
 
 @Entity(tableName = "trip_cells", primaryKeys = ["mode", "y", "x"])
-data class TripCell(val mode: String, val y: Int, val x: Int)
+data class TripCell(val mode: String, val y: Int, val x: Int,
+    @ColumnInfo(defaultValue = "-1") val elapsedSeconds: Double = -1.0)
 
 data class CoverageBounds(val minX: Int?, val maxX: Int?, val minY: Int?, val maxY: Int?) {
     fun domain(): CellBounds? = minX?.let { CellBounds(it, maxX!!, minY!!, maxY!!) }
@@ -99,12 +101,12 @@ interface ExplorationDao {
         putSession(RouteSession(mode, startedAt, null, false, 0.0))
     }
     @Transaction
-    suspend fun saveAccepted(cells: List<ExploredCell>, sample: RouteSampleRow?, startedAt: Long?) {
+    suspend fun saveAccepted(cells: List<ExploredCell>, sample: RouteSampleRow?, startedAt: Long?, elapsed: Double = -1.0) {
         if (sample != null && startedAt != null) beginRoute(sample.mode, startedAt)
         val inserted = insert(cells)
         val fresh = cells.filterIndexed { index, _ -> inserted[index] != -1L }
         if (fresh.isNotEmpty()) {
-            insertTrip(fresh.map { TripCell(it.mode, it.y, it.x) })
+            insertTrip(fresh.map { TripCell(it.mode, it.y, it.x, elapsed) })
             val area = br.com.expoworld.core.ExplorationProgress.fromRows(
                 fresh.groupingBy { it.y }.eachCount().map { it.key to it.value.toLong() }).areaSquareMeters
             addNewArea(fresh.first().mode, area)
@@ -125,7 +127,7 @@ interface ExplorationDao {
     }
 }
 
-@Database(entities = [ExploredCell::class, TripCell::class, RouteSession::class, RouteSampleRow::class], version = 5, exportSchema = true)
+@Database(entities = [ExploredCell::class, TripCell::class, RouteSession::class, RouteSampleRow::class], version = 6, exportSchema = true)
 abstract class ExplorationDatabase : RoomDatabase() { abstract fun cells(): ExplorationDao }
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -156,7 +158,23 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
     }
 }
 
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE cells ADD COLUMN firstDiscoveredAtMillis INTEGER DEFAULT NULL")
+        db.execSQL("ALTER TABLE trip_cells ADD COLUMN elapsedSeconds REAL NOT NULL DEFAULT -1")
+    }
+}
+
 class ExplorationRepository(private val dao: ExplorationDao) {
+    suspend fun visualCells(mode: String, bounds: CellBounds): List<br.com.expoworld.core.CellDiscovery> {
+        val rows = dao.visible(mode, bounds.minX, bounds.maxX, bounds.minY, bounds.maxY, ExplorationConfig.MAX_VIEW_CELLS + 1)
+        check(rows.size <= ExplorationConfig.MAX_VIEW_CELLS) { "Aproxime o mapa para mostrar a exploração desta região." }
+        return rows.map { br.com.expoworld.core.CellDiscovery(Cell(it.x, it.y), it.firstDiscoveredAtMillis) }
+    }
+    suspend fun timeline(mode: String, bounds: CellBounds): List<br.com.expoworld.core.TripDiscovery> =
+        dao.discoveries(mode, bounds.minX, bounds.maxX, bounds.minY, bounds.maxY).map {
+            br.com.expoworld.core.TripDiscovery(Cell(it.x, it.y), it.elapsedSeconds)
+        }
     suspend fun extent(mode: String) = dao.extent(mode).domain()
     suspend fun coverage(mode: String, bounds: CellBounds): List<CellBounds> {
         var stride = 8
@@ -174,8 +192,9 @@ class ExplorationRepository(private val dao: ExplorationDao) {
         // One Room transaction per accepted fix; committed before UI revision changes.
         dao.insert(cells.map { ExploredCell(mode, it.y, it.x) })
     }
-    suspend fun saveAccepted(mode: String, cells: Set<Cell>, sample: TraceSample?, startedAt: Long? = null) = dao.saveAccepted(
-        cells.map { ExploredCell(mode, it.y, it.x) }, sample?.toRow(mode), startedAt
+    suspend fun saveAccepted(mode: String, cells: Set<Cell>, sample: TraceSample?, startedAt: Long? = null,
+        elapsed: Double = sample?.elapsedSeconds ?: -1.0, discoveredAt: Long = System.currentTimeMillis()) = dao.saveAccepted(
+        cells.map { ExploredCell(mode, it.y, it.x, discoveredAt) }, sample?.toRow(mode), startedAt, elapsed
     )
     suspend fun beginRoute(mode: String) = dao.beginRoute(mode, System.currentTimeMillis())
     suspend fun finishRoute(mode: String, last: TraceSample?) = dao.finishRoute(mode, System.currentTimeMillis(), last?.toRow(mode))

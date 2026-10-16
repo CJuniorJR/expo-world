@@ -24,7 +24,7 @@ class ExplorationBackupTest {
         val text = encode(listOf(Cell(10, -20)))
         invalid(text.replace("10\t-20", "11\t-20"))
         invalid(text.substringBefore("END"))
-        invalid(text.replace("EXPO_WORLD\t1\t10", "EXPO_WORLD\t1\t20"))
+        invalid(text.replace("EXPO_WORLD\t2\t10", "EXPO_WORLD\t2\t20"))
         invalid(text + "EXTRA\n")
         invalid(text.replace("END\t1", "END\t2"))
     }

@@ -24,7 +24,9 @@ class ExplorationProcessor(private val app: WorldApp, private val mode: String) 
             is FilterResult.Rejected -> { trace.breakContinuity(); app.tracking.update { it.copy(message = result.message) }; false }
             is FilterResult.Accepted -> {
                 val cells = withContext(Dispatchers.Default) { Revealer.cells(result.fix, result.previous) }
-                app.repository.saveAccepted(mode, cells, trace.accept(result.fix, result.previous != null), startedAt.takeUnless { begun })
+                val sample = trace.accept(result.fix, result.previous != null)
+                app.repository.saveAccepted(mode, cells, sample, startedAt.takeUnless { begun }, trace.liveHead()?.elapsedSeconds ?: -1.0,
+                    System.currentTimeMillis() - ((now - fix.monotonicSeconds).coerceAtLeast(0.0) * 1000).toLong())
                 begun = true
                 app.tracking.update { it.copy(position = fix, liveHead = trace.liveHead(), revision = it.revision + 1,
                     message = if (mode == "simulation") "MODO SIMULADO • trajeto de desenvolvimento" else "Explorando • localização precisa. Você pode bloquear a tela.") }

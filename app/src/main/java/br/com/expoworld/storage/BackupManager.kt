@@ -22,7 +22,7 @@ class BackupManager(private val app: WorldApp) {
                         coroutineContext.ensureActive()
                         val page = app.database.cells().exportPage(y, x)
                         if (page.isEmpty()) break
-                        page.forEach { encoder.cell(br.com.expoworld.core.Cell(it.x, it.y)) }
+                        page.forEach { encoder.cell(br.com.expoworld.core.Cell(it.x, it.y), it.firstDiscoveredAtMillis) }
                         y = page.last().y; x = page.last().x
                     }
                     encoder.finish()
@@ -56,12 +56,12 @@ class BackupManager(private val app: WorldApp) {
             app.database.withTransaction {
                 var added = 0L
                 temp.bufferedReader(Charsets.UTF_8).use { reader ->
-                    val iterator = ExplorationBackup.decode(reader).iterator()
+                    val iterator = ExplorationBackup.decodeRecords(reader).iterator()
                     while (iterator.hasNext()) {
                         coroutineContext.ensureActive()
                         val batch = ArrayList<ExploredCell>(1024)
                         while (batch.size < 1024 && iterator.hasNext()) {
-                            val cell = iterator.next(); batch.add(ExploredCell("real", cell.y, cell.x))
+                            val record = iterator.next(); batch.add(ExploredCell("real", record.cell.y, record.cell.x, record.firstDiscoveredAtMillis))
                         }
                         added += app.database.cells().insert(batch).count { it != -1L }
                     }

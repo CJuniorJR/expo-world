@@ -8,7 +8,8 @@ import java.security.MessageDigest
 object ExplorationBackup {
     const val MAX_CELLS = 5_000_000L
     const val MAX_BYTES = 128L * 1024 * 1024
-    private const val HEADER = "EXPO_WORLD\t1\t10"
+    private const val HEADER = "EXPO_WORLD\t2\t10"
+    data class Record(val cell: Cell, val firstDiscoveredAtMillis: Long?)
     private fun digest() = MessageDigest.getInstance("SHA-256")
     private fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it.toInt() and 255) }
     private fun validate(cell: Cell) {
@@ -20,16 +21,18 @@ object ExplorationBackup {
         private val checksum = digest()
         private var count = 0L
         init { writer.write("$HEADER\n") }
-        fun cell(cell: Cell) {
+        fun cell(cell: Cell, firstDiscoveredAtMillis: Long? = null) {
             validate(cell); require(++count <= MAX_CELLS) { "Backup excede o limite de células." }
-            val line = "${cell.x}\t${cell.y}\n"
+            require(firstDiscoveredAtMillis == null || firstDiscoveredAtMillis in 1..4102444800000L)
+            val line = "${cell.x}\t${cell.y}\t${firstDiscoveredAtMillis ?: "-"}\n"
             checksum.update(line.toByteArray(Charsets.UTF_8)); writer.write(line)
         }
         fun finish(): Long {
             writer.write("END\t$count\t${hex(checksum.digest())}\n"); writer.flush(); return count
         }
     }
-    fun decode(reader: Reader): Sequence<Cell> = sequence {
+    fun decode(reader: Reader): Sequence<Cell> = decodeRecords(reader).map { it.cell }
+    fun decodeRecords(reader: Reader): Sequence<Record> = sequence {
         val input = reader.buffered()
         // Bound each line too: an untrusted file must not allocate an enormous string.
         fun line(): String? {
@@ -42,7 +45,9 @@ object ExplorationBackup {
                 out.append(char.toChar())
             }
         }
-        require(line() == HEADER) { "Backup incompatível: use um arquivo Expo World válido." }
+        val header = line()
+        require(header == HEADER || header == "EXPO_WORLD\t1\t10") { "Backup incompatível: use um arquivo Expo World válido." }
+        val version2 = header == HEADER
         val checksum = digest()
         var count = 0L
         while (true) {
@@ -53,11 +58,13 @@ object ExplorationBackup {
                 require(line() == null) { "Dados extras no backup." }
                 break
             }
-            require(++count <= MAX_CELLS && parts.size == 2) { "Backup inválido ou muito grande." }
+            require(++count <= MAX_CELLS && parts.size == if (version2) 3 else 2) { "Backup inválido ou muito grande." }
             val cell = Cell(parts[0].toIntOrNull() ?: error("Coordenada inválida."), parts[1].toIntOrNull() ?: error("Coordenada inválida."))
             validate(cell)
+            val date = if (!version2 || parts[2] == "-") null else parts[2].toLongOrNull() ?: error("Data inválida.")
+            require(date == null || date in 1..4102444800000L) { "Data inválida no backup." }
             checksum.update((text + "\n").toByteArray(Charsets.UTF_8))
-            yield(cell)
+            yield(Record(cell, date))
         }
     }
 }

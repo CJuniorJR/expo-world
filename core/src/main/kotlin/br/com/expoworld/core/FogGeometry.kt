@@ -43,8 +43,8 @@ object FogGeometry {
         rounded.geometryChanged()
         return world.difference(rounded)
     }
-    fun geoJson(cells: List<Cell>): String {
-        val shape = geometry(cells)
+    fun geoJson(cells: List<Cell>): String = geoJson(geometry(cells))
+    fun geoJson(shape: Geometry): String {
         fun ring(line: LineString) = line.coordinates.joinToString(",", "[", "]") { "[${it.x},${it.y}]" }
         fun polygon(p: Polygon): String = (listOf(ring(p.exteriorRing)) + (0 until p.numInteriorRing).map { ring(p.getInteriorRingN(it)) }).joinToString(",", "[", "]")
         val polygons = (0 until shape.numGeometries).mapNotNull { shape.getGeometryN(it) as? Polygon }
