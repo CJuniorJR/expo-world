@@ -14,7 +14,11 @@ class ExplorationProcessor(private val app: WorldApp, private val mode: String) 
     suspend fun begin() { startedAt = System.currentTimeMillis() }
     suspend fun finish() { if (begun) { app.repository.finishRoute(mode, trace.finish()); begun = false } }
     fun hasData() = begun
-    fun breakContinuity() = filter.breakContinuity()
+    fun breakContinuity() { filter.breakContinuity(); trace.breakContinuity() }
+    suspend fun pause() {
+        if (begun) trace.finish()?.let { app.repository.saveAccepted(mode, emptySet(), it) }
+        breakContinuity()
+    }
     suspend fun ingest(fix: Fix, now: Double): Boolean {
         return when (val result = filter.accept(fix, now)) {
             is FilterResult.Rejected -> { trace.breakContinuity(); app.tracking.update { it.copy(message = result.message) }; false }
