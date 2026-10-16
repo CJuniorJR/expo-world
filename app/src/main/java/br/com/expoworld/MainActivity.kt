@@ -30,6 +30,7 @@ import br.com.expoworld.core.GpsSignal
 import br.com.expoworld.core.GpsQuality
 import br.com.expoworld.core.SimulationScenario
 import br.com.expoworld.storage.BackupManager
+import br.com.expoworld.storage.ExpeditionExporter
 import br.com.expoworld.location.*
 import br.com.expoworld.ui.WorldMap
 import br.com.expoworld.ui.ExplorationScreen
@@ -51,6 +52,17 @@ class MainActivity : ComponentActivity() {
     private var pendingStart = false
     private val storageBusy = mutableStateOf(false)
     private val storageMessage = mutableStateOf("")
+    private fun exportMedia(uri: android.net.Uri, animated: Boolean) {
+        val prefs = getSharedPreferences("map", MODE_PRIVATE)
+        val mode = prefs.getString("exportMode", "real") ?: "real"
+        val title = prefs.getString("cardTitle", "Minha expedição") ?: "Minha expedição"
+        runBackup {
+            ExpeditionExporter(app).export(uri, mode, title, animated)
+            if (animated) "Replay salvo como GIF animado." else "Cartão salvo como imagem PNG."
+        }
+    }
+    private val exportCard = registerForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri -> uri?.let { exportMedia(it, false) } }
+    private val exportAnimation = registerForActivityResult(ActivityResultContracts.CreateDocument("image/gif")) { uri -> uri?.let { exportMedia(it, true) } }
     private val exportBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         uri?.let { runBackup { "Backup salvo: ${BackupManager(app).export(it)} células reais. Guarde o arquivo para restaurar em outro aparelho." } }
     }
@@ -63,7 +75,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             try { storageMessage.value = action(); worldMap.refreshFog() }
             catch (e: CancellationException) { throw e }
-            catch (e: Exception) { storageMessage.value = "Não foi possível concluir o backup/restauração. Confira o arquivo e o espaço livre. Nenhuma exploração anterior foi apagada." }
+            catch (e: Exception) { storageMessage.value = "Não foi possível concluir a operação. Confira o arquivo e o espaço livre. A exploração salva foi preservada." }
             finally { app.storageBusy = false; storageBusy.value = false }
         }
     }
@@ -162,6 +174,7 @@ class MainActivity : ComponentActivity() {
         var scenarioIndex by rememberSaveable { mutableIntStateOf(0) }
         var highlight by rememberSaveable { mutableStateOf(false) }
         val preferences = remember { getSharedPreferences("map", MODE_PRIVATE) }
+        var cardTitle by rememberSaveable { mutableStateOf(preferences.getString("cardTitle", "Minha expedição") ?: "Minha expedição") }
         var fogOpacity by remember { mutableFloatStateOf(preferences.getFloat("fogOpacity", .55f).coerceIn(.2f, .8f)) }
         val viewMode = if (state.active) { if (state.simulated) "simulation" else "real" } else if (simulatedView) "simulation" else "real"
         val progressFlow = remember(viewMode) { app.repository.progress(viewMode) }
@@ -174,6 +187,7 @@ class MainActivity : ComponentActivity() {
         val route = completedTrace?.takeIf { it.mode == viewMode }
         val displayedRoute = route?.takeIf { !state.active || !it.completed }
         var traceVisible by rememberSaveable { mutableStateOf(true) }
+        var focusAfterTrip by rememberSaveable { mutableStateOf<Long?>(null) }
         val mapStatus by mapMessage
         val currentDialog by dialog
         val permissionsRevision by permissionVersion
@@ -186,7 +200,10 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(viewMode, progress.cells) { worldMap.setMode(viewMode) }
         LaunchedEffect(state.position, viewMode) { worldMap.updatePosition(state.position.takeIf { state.simulated == (viewMode == "simulation") }) }
         LaunchedEffect(state.active, route?.startedAtMillis, route?.completed, viewMode) {
-            if (!state.active && route != null) { traceVisible = true; worldMap.focusTrace(route) }
+            if (state.active && route != null && !route.completed) focusAfterTrip = route.startedAtMillis
+            if (!state.active && route?.completed == true && route.startedAtMillis == focusAfterTrip) {
+                traceVisible = true; worldMap.focusTrace(route); focusAfterTrip = null
+            }
             if (state.active) worldMap.setFollowing(true) else worldMap.setFollowing(false)
         }
         LaunchedEffect(displayedRoute, state.liveHead, traceVisible, state.active) {
@@ -229,6 +246,10 @@ class MainActivity : ComponentActivity() {
             storageMessage = storageMessage.value,
             onExport = { exportBackup.launch("expo-world-${java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date())}.expoworld") },
             onImport = { importBackup.launch(arrayOf("application/octet-stream", "text/plain", "*/*")) },
+            cardTitle = cardTitle,
+            onCardTitleChange = { cardTitle = it.take(40); preferences.edit().putString("cardTitle", cardTitle).apply() },
+            onCardExport = { preferences.edit().putString("exportMode", viewMode).apply(); exportCard.launch("expo-world-cartao.png") },
+            onAnimationExport = { preferences.edit().putString("exportMode", viewMode).apply(); exportAnimation.launch("expo-world-replay.gif") },
             trace = displayedRoute,
             traceVisible = traceVisible,
             onTraceVisibleChange = { traceVisible = it },

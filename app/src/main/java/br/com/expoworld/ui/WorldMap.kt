@@ -1,6 +1,7 @@
 package br.com.expoworld.ui
 
 import android.content.Context
+import android.graphics.PointF
 import androidx.core.view.doOnLayout
 import br.com.expoworld.BuildConfig
 import br.com.expoworld.WorldApp
@@ -48,6 +49,16 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
     private var fogWarning = ""
     private var fogOpacity = context.getSharedPreferences("map", Context.MODE_PRIVATE).getFloat("fogOpacity", .55f).coerceIn(.2f, .8f)
     private var showDiscoveries = false
+    private var presentation = MapPresentation.NORMAL
+    private var comparison = .5f
+    private var replayFraction = 0f
+    private var scene: ExplorationScene? = null
+    private var visualJob: Job? = null
+    private var visualRequest = 0
+    private var visualRunning = false
+    private var visualRunToken = 0
+    private var replaySamples: List<TraceSample> = emptyList()
+    private var replayRouteKey: List<Any?>? = null
     val configured = BuildConfig.MAP_STYLE_URL.isNotBlank() || BuildConfig.MAPTILER_KEY.isNotBlank()
     private val fallback = """{"version":8,"sources":{},"layers":[{"id":"background","type":"background","paint":{"background-color":"#bbc7c3"}}]}"""
 
@@ -58,8 +69,9 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
             applyInsets()
             loaded.setMinZoomPreference(2.0)
             loaded.setMaxZoomPreference(20.0)
-            loaded.cameraPosition = CameraPosition.Builder().target(LatLng(-23.5615, -46.6559)).zoom(15.0).build()
+            loaded.cameraPosition = CameraPosition.Builder().target(LatLng(SimulatedRoute.DEFAULT_LATITUDE, SimulatedRoute.DEFAULT_LONGITUDE)).zoom(15.0).build()
             loaded.addOnCameraIdleListener { refreshFog() }
+            loaded.addOnCameraMoveListener { if (presentation == MapPresentation.COMPARE) renderVisual() }
             loaded.addOnCameraMoveStartedListener { reason ->
                 if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) setFollowing(false)
             }
@@ -97,6 +109,7 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         val m = map ?: return
         fogJob?.cancel()
         traceJob?.cancel()
+        visualRunToken++; visualJob?.cancel(); visualRunning = false; scene = null
         generation++
         style = null
         fogWarning = ""
@@ -113,6 +126,10 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
             s.addLayer(FillLayer("coverage-fill", "coverage").withProperties(fillColor("#70E1BA"), fillOpacity(.3f)))
             s.addSource(GeoJsonSource("discoveries", emptyFeatures))
             s.addLayer(FillLayer("discoveries-fill", "discoveries").withProperties(fillColor("#FFD166"), fillOpacity(.45f)))
+            s.addSource(GeoJsonSource("comparison", emptyFeatures))
+            s.addLayer(FillLayer("comparison-fill", "comparison").withProperties(fillColor("#101820"), fillOpacity(fogOpacity)))
+            s.addSource(GeoJsonSource("epochs", emptyFeatures))
+            s.addLayer(FillLayer("epochs-fill", "epochs").withProperties(fillColor(Expression.get("color")), fillOpacity(.45f)))
             s.addSource(GeoJsonSource("speed-route", emptyFeatures))
             s.addSource(GeoJsonSource("speed-stops", emptyFeatures))
             s.addLayer(LineLayer("speed-route-outline", "speed-route").withProperties(lineColor("#102027"), lineWidth(10f),
@@ -133,6 +150,8 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
             s.addLayer(FillLayer("accuracy-fill", "accuracy").withProperties(fillColor("#69ABFF"), fillOpacity(.16f)))
             s.addLayer(LineLayer("accuracy-border", "accuracy").withProperties(lineColor("#69ABFF"), lineWidth(1.5f)))
             s.addLayer(CircleLayer("position-dot", "position").withProperties(circleColor("#007DFF"), circleRadius(7f), circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
+            s.addSource(GeoJsonSource("replay-head", emptyFeatures))
+            s.addLayer(CircleLayer("replay-dot", "replay-head").withProperties(circleColor("#FFD166"), circleRadius(8f), circleStrokeColor("#FFFFFF"), circleStrokeWidth(2f)))
             updatePosition(position)
             loadFailure = false
             publishMessage()
@@ -143,16 +162,20 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
     }
     fun setMode(value: String) {
         if (value != mode) {
+            visualRunToken++; visualJob?.cancel(); visualRunning = false; scene = null
             mode = value; position = null; centered = false
             style?.getSourceAs<GeoJsonSource>("position")?.setGeoJson("""{"type":"FeatureCollection","features":[]}""")
             style?.getSourceAs<GeoJsonSource>("fog")?.setGeoJson(FogGeometry.geoJson(emptyList()))
             style?.getSourceAs<GeoJsonSource>("coverage")?.setGeoJson(emptyFeatures)
             style?.getSourceAs<GeoJsonSource>("discoveries")?.setGeoJson(emptyFeatures)
+            style?.getSourceAs<GeoJsonSource>("comparison")?.setGeoJson(emptyFeatures)
+            style?.getSourceAs<GeoJsonSource>("epochs")?.setGeoJson(emptyFeatures)
         }
         refreshFog()
     }
     fun updatePosition(fix: Fix?) {
         position = fix
+        if (presentation == MapPresentation.REPLAY) return
         if (fix == null) return
         style?.getSourceAs<GeoJsonSource>("position")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(fix.longitude, fix.latitude)))
         if (!centered && map != null) { center(); centered = true }
@@ -160,12 +183,68 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
     }
     fun updateAccuracy(fix: Fix?) {
         accuracyFix = fix
+        if (presentation == MapPresentation.REPLAY) return
         style?.getSourceAs<GeoJsonSource>("accuracy")?.setGeoJson(AccuracyGeometry.geoJson(fix))
     }
     fun center() { position?.let { map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), 16.0)) } }
     fun setFogOpacity(value: Float) {
         fogOpacity = value.coerceIn(.2f, .8f)
         style?.getLayerAs<FillLayer>("fog-fill")?.setProperties(fillOpacity(fogOpacity))
+        style?.getLayerAs<FillLayer>("comparison-fill")?.setProperties(fillOpacity(fogOpacity))
+    }
+    fun setPresentation(value: MapPresentation, fraction: Float) {
+        val changed = presentation != value
+        presentation = value
+        comparison = fraction.coerceIn(0f, 1f)
+        replayFraction = fraction.coerceIn(0f, 1f)
+        if (changed) {
+            visualRunToken++
+            visualJob?.cancel(); visualJob = null; visualRunning = false; scene = null
+            listOf("comparison", "epochs", "replay-head").forEach { style?.getSourceAs<GeoJsonSource>(it)?.setGeoJson(emptyFeatures) }
+            if (value != MapPresentation.NORMAL) setFollowing(false)
+            if (value == MapPresentation.REPLAY) {
+                style?.getSourceAs<GeoJsonSource>("position")?.setGeoJson(emptyFeatures)
+                style?.getSourceAs<GeoJsonSource>("accuracy")?.setGeoJson(emptyFeatures)
+                trace?.let { focusTrace(it) }
+            } else { updatePosition(position); updateAccuracy(accuracyFix) }
+            renderedTail = null; renderedHistory = null; pendingTail = null
+            refreshFog()
+        }
+        if (value == MapPresentation.REPLAY) renderTrace()
+        if (value == MapPresentation.COMPARE || value == MapPresentation.REPLAY) renderVisual()
+        if (changed && value != MapPresentation.REPLAY) renderTrace()
+    }
+    private fun renderVisual() {
+        visualRequest++
+        if (visualRunning) return
+        val snapshot = scene ?: return
+        val s = style ?: return
+        val selected = presentation
+        if (selected != MapPresentation.COMPARE && selected != MapPresentation.REPLAY) return
+        val request = visualRequest
+        val fraction = replayFraction
+        val clip = if (selected == MapPresentation.COMPARE && view.width > 0 && view.height > 0) {
+            val x = view.width * comparison
+            listOf(PointF(0f, 0f), PointF(x.coerceAtLeast(.01f), 0f), PointF(x.coerceAtLeast(.01f), view.height.toFloat()), PointF(0f, view.height.toFloat()))
+                .map { point -> map!!.projection.fromScreenLocation(point).let { XY(it.longitude, it.latitude) } }
+        } else emptyList()
+        val elapsed = ReplayTimeline.elapsed(replaySamples, fraction)
+        visualRunning = true
+        val runToken = ++visualRunToken
+        visualJob = scope.launch {
+            try {
+                val json = withContext(Dispatchers.Default) {
+                    fogMutex.withLock { ensureActive()
+                        if (selected == MapPresentation.COMPARE) snapshot.comparisonMask(clip) else snapshot.replayFog(elapsed)
+                    }
+                }
+                if (scene === snapshot && style === s && presentation == selected) {
+                    s.getSourceAs<GeoJsonSource>(if (selected == MapPresentation.COMPARE) "comparison" else "fog")?.setGeoJson(json)
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { message("Aproxime o mapa para comparar ou animar a névoa.") }
+            finally { if (runToken == visualRunToken) { visualRunning = false; if (request != visualRequest && scene === snapshot) renderVisual() } }
+        }
     }
     fun setDiscoveries(value: Boolean) { showDiscoveries = value; refreshFog() }
     fun overview() {
@@ -199,7 +278,13 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
     }
     private fun renderTrace() {
         val s = style ?: return
-        val data = trace
+        val original = trace
+        val routeKey = listOf(original?.mode, original?.startedAtMillis, original?.samples?.size, original?.samples?.firstOrNull(), original?.samples?.lastOrNull())
+        if (routeKey != replayRouteKey) { replayRouteKey = routeKey; replaySamples = ReplayTimeline.visualSamples(original?.samples.orEmpty()) }
+        val data = if (presentation == MapPresentation.REPLAY && original != null)
+            original.copy(samples = ReplayTimeline.frame(replaySamples, replayFraction)) else original
+        s.getSourceAs<GeoJsonSource>("replay-head")?.setGeoJson(
+            if (presentation == MapPresentation.REPLAY) data?.samples?.lastOrNull()?.let { Feature.fromGeometry(Point.fromLngLat(it.longitude, it.latitude)).toJson() } ?: emptyFeatures else emptyFeatures)
         if (data == null) {
             traceJob?.cancel()
             renderedTail = null; renderedHistory = null; pendingTail = null
@@ -272,9 +357,12 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
                 val json = withContext(Dispatchers.Default) { CoverageGeometry.geoJson(coverage) }
                 ensureActive()
                 if (request == generation && style === s) {
+                    scene = null
                     s.getSourceAs<GeoJsonSource>("fog")?.setGeoJson(FogGeometry.geoJson(emptyList()))
                     s.getSourceAs<GeoJsonSource>("coverage")?.setGeoJson(json)
                     s.getSourceAs<GeoJsonSource>("discoveries")?.setGeoJson(emptyFeatures)
+                    s.getSourceAs<GeoJsonSource>("epochs")?.setGeoJson(emptyFeatures)
+                    s.getSourceAs<GeoJsonSource>("comparison")?.setGeoJson(emptyFeatures)
                     fogWarning = "Visão geral • cobertura aproximada em verde. Aproxime para ver os limites reais."
                     publishMessage()
                 }
@@ -284,22 +372,32 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
                     showCoverage()
                     return@launch
                 }
-                val cells = withContext(Dispatchers.IO) {
+                val facts = withContext(Dispatchers.IO) {
                     // The SDK can return unwrapped longitudes such as 179..181.
-                    viewBounds.flatMap { app.repository.visible(selectedMode, it) }
+                    viewBounds.flatMap { app.repository.visualCells(selectedMode, it) }
                 }
-                val discoveries = if (showDiscoveries) withContext(Dispatchers.IO) {
-                    viewBounds.flatMap { app.repository.discoveries(selectedMode, it) }
+                val timeline = if (showDiscoveries || presentation != MapPresentation.NORMAL) withContext(Dispatchers.IO) {
+                    viewBounds.flatMap { app.repository.timeline(selectedMode, it) }
                 } else emptyList()
+                val discoveries = if (showDiscoveries && presentation == MapPresentation.NORMAL) timeline.map { it.cell } else emptyList()
+                val snapshot = ExplorationScene(facts, timeline)
                 val json = withContext(Dispatchers.Default) {
-                    fogMutex.withLock { ensureActive(); FogGeometry.geoJson(cells.distinct()) }
+                    fogMutex.withLock { ensureActive()
+                        if (presentation == MapPresentation.REPLAY) snapshot.replayFog(ReplayTimeline.elapsed(replaySamples, replayFraction)) else snapshot.afterJson
+                    }
                 }
                 val newJson = withContext(Dispatchers.Default) { CoverageGeometry.geoJson(CoverageGeometry.rows(discoveries)) }
+                val epochJson = if (presentation == MapPresentation.EPOCHS) withContext(Dispatchers.Default) {
+                    DiscoveryHistory.geoJson(facts, timeline.map { it.cell }.toSet(), System.currentTimeMillis())
+                } else emptyFeatures
                 ensureActive()
                 if (request == generation && style === s) {
+                    scene = snapshot
                     s.getSourceAs<GeoJsonSource>("fog")?.setGeoJson(json)
                     s.getSourceAs<GeoJsonSource>("coverage")?.setGeoJson(emptyFeatures)
                     s.getSourceAs<GeoJsonSource>("discoveries")?.setGeoJson(newJson)
+                    s.getSourceAs<GeoJsonSource>("epochs")?.setGeoJson(epochJson)
+                    renderVisual()
                     if (fogWarning.isNotEmpty()) { fogWarning = ""; publishMessage() }
                 }
             } catch (e: CancellationException) { throw e }
@@ -313,10 +411,12 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
                 s.getSourceAs<GeoJsonSource>("fog")?.setGeoJson(FogGeometry.geoJson(emptyList()))
                 s.getSourceAs<GeoJsonSource>("coverage")?.setGeoJson(emptyFeatures)
                 s.getSourceAs<GeoJsonSource>("discoveries")?.setGeoJson(emptyFeatures)
+                s.getSourceAs<GeoJsonSource>("epochs")?.setGeoJson(emptyFeatures)
+                s.getSourceAs<GeoJsonSource>("comparison")?.setGeoJson(emptyFeatures)
                 fogWarning = "Aproxime o mapa para visualizar a exploração. Se persistir, confira o armazenamento."
                 publishMessage()
             }
         }
     }
-    fun dispose() { fogJob?.cancel(); traceJob?.cancel() }
+    fun dispose() { fogJob?.cancel(); traceJob?.cancel(); visualJob?.cancel() }
 }

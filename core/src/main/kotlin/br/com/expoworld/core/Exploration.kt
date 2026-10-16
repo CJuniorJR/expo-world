@@ -115,7 +115,21 @@ object Revealer {
 }
 
 object SimulatedRoute {
-    // São Paulo: cruise, deceleration, slow traffic, a stop, then acceleration.
+    // Curitiba center: connected OSM geometry, not navigation/one-way guidance.
+    // Marechal Floriano -> André de Barros -> Barão do Rio Branco -> Pedro Ivo.
+    const val DEFAULT_LATITUDE = -25.4284
+    const val DEFAULT_LONGITUDE = -49.2733
+    private val path = listOf(
+        -25.4338968 to -49.2705333, -25.4352631 to -49.2698546,
+        -25.4348518 to -49.2688272, -25.4347609 to -49.2685999,
+        -25.4345037 to -49.2679574, -25.4342507 to -49.2673266,
+        -25.4341569 to -49.2673704, -25.4335399 to -49.2676583,
+        -25.4329195 to -49.2679477, -25.4334503 to -49.2693522,
+        -25.4335092 to -49.2695081, -25.4336156 to -49.2697911,
+        -25.4337914 to -49.2702547, -25.4338968 to -49.2705333
+    ).map { (lat, lon) -> Fix(lat, lon, 5.0, 0.0) }
+    private val lengths = path.zipWithNext().map { (a, b) -> Geo.distance(a, b) }
+    private val total = lengths.sum()
     private fun speed(second: Int): Double = when {
         second <= 25 -> 15.0
         second <= 40 -> 15.0 - (second - 25) * .8
@@ -126,13 +140,14 @@ object SimulatedRoute {
         else -> 12.0
     }
     fun fix(index: Int, time: Double): Fix {
-        val origin = Geo.project(-23.5615, -46.6559)
         val leg = index.coerceIn(0, LAST_INDEX)
-        val distance = (1..leg).sumOf { speed(it) }
-        val scale = 1 / cos(Math.toRadians(-23.5615))
-        val x = origin.x + distance * .8 * scale
-        val y = origin.y + distance * .6 * scale
-        return Fix(Geo.latitude(y), Geo.longitude(x), 5.0, time, speed(leg))
+        var distance = (1..leg).sumOf { speed(it) } % total
+        var segment = 0
+        while (segment < lengths.lastIndex && distance > lengths[segment]) { distance -= lengths[segment]; segment++ }
+        val a = Geo.project(path[segment].latitude, path[segment].longitude)
+        val b = Geo.project(path[segment + 1].latitude, path[segment + 1].longitude)
+        val t = distance / lengths[segment]
+        return Fix(Geo.latitude(a.y + (b.y - a.y) * t), Geo.longitude(a.x + (b.x - a.x) * t), 5.0, time, speed(leg))
     }
     const val LAST_INDEX = 120
 }
