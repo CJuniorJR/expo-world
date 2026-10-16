@@ -131,6 +131,10 @@ Chaves de tiles distribuídas num APK são recuperáveis; `local.properties` evi
 
 Internet é necessária para obter tiles/estilo ainda não carregados. Cache eventual do SDK não constitui suporte a mapas offline completos. Nenhuma operação de GPS ou persistência depende do provedor ou da internet; mapas não carregados podem ficar sem ruas, enquanto a exploração continua sendo salva localmente.
 
+## Fluxo de alterações no GitHub
+
+Antes de começar, busque as atualizações remotas e confira a `main`, as branches e os PRs existentes para incluir as alterações feitas em outros computadores. Trabalhe em uma branch `codex/`. Cada entrega deve ter um **Pull Request com destino à `main`**, com resumo e verificações; integre pela interface/API de PR após as verificações e a autorização aplicável, em vez de deixar a entrega apenas na branch ou fazer push direto na `main`. Ao concluir, informe o link do PR e o estado do merge. Nunca inclua `local.properties`, chaves, bancos pessoais, caches ou APKs nos commits.
+
 ## Organização e versões
 
 - `app/.../ui`: mapa e montagem da névoa visível; `MainActivity`: interface Compose e permissões.
