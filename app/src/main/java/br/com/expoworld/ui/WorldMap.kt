@@ -46,6 +46,8 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
     private var following = false
     private var loadFailure = false
     private var fogWarning = ""
+    private var fogOpacity = context.getSharedPreferences("map", Context.MODE_PRIVATE).getFloat("fogOpacity", .55f).coerceIn(.2f, .8f)
+    private var showDiscoveries = false
     val configured = BuildConfig.MAP_STYLE_URL.isNotBlank() || BuildConfig.MAPTILER_KEY.isNotBlank()
     private val fallback = """{"version":8,"sources":{},"layers":[{"id":"background","type":"background","paint":{"background-color":"#bbc7c3"}}]}"""
 
@@ -54,7 +56,7 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         view.getMapAsync { loaded ->
             map = loaded
             applyInsets()
-            loaded.setMinZoomPreference(8.0)
+            loaded.setMinZoomPreference(2.0)
             loaded.setMaxZoomPreference(20.0)
             loaded.cameraPosition = CameraPosition.Builder().target(LatLng(-23.5615, -46.6559)).zoom(15.0).build()
             loaded.addOnCameraIdleListener { refreshFog() }
@@ -106,7 +108,11 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
             style = s
             renderedTail = null; renderedHistory = null; pendingTail = null
             s.addSource(GeoJsonSource("fog", FogGeometry.geoJson(emptyList())))
-            s.addLayer(FillLayer("fog-fill", "fog").withProperties(fillColor("#101820"), fillOpacity(.55f), fillAntialias(true)))
+            s.addLayer(FillLayer("fog-fill", "fog").withProperties(fillColor("#101820"), fillOpacity(fogOpacity), fillAntialias(true)))
+            s.addSource(GeoJsonSource("coverage", emptyFeatures))
+            s.addLayer(FillLayer("coverage-fill", "coverage").withProperties(fillColor("#70E1BA"), fillOpacity(.3f)))
+            s.addSource(GeoJsonSource("discoveries", emptyFeatures))
+            s.addLayer(FillLayer("discoveries-fill", "discoveries").withProperties(fillColor("#FFD166"), fillOpacity(.45f)))
             s.addSource(GeoJsonSource("speed-route", emptyFeatures))
             s.addSource(GeoJsonSource("speed-stops", emptyFeatures))
             s.addLayer(LineLayer("speed-route-outline", "speed-route").withProperties(lineColor("#102027"), lineWidth(10f),
@@ -140,6 +146,8 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
             mode = value; position = null; centered = false
             style?.getSourceAs<GeoJsonSource>("position")?.setGeoJson("""{"type":"FeatureCollection","features":[]}""")
             style?.getSourceAs<GeoJsonSource>("fog")?.setGeoJson(FogGeometry.geoJson(emptyList()))
+            style?.getSourceAs<GeoJsonSource>("coverage")?.setGeoJson(emptyFeatures)
+            style?.getSourceAs<GeoJsonSource>("discoveries")?.setGeoJson(emptyFeatures)
         }
         refreshFog()
     }
@@ -155,6 +163,34 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         style?.getSourceAs<GeoJsonSource>("accuracy")?.setGeoJson(AccuracyGeometry.geoJson(fix))
     }
     fun center() { position?.let { map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), 16.0)) } }
+    fun setFogOpacity(value: Float) {
+        fogOpacity = value.coerceIn(.2f, .8f)
+        style?.getLayerAs<FillLayer>("fog-fill")?.setProperties(fillOpacity(fogOpacity))
+    }
+    fun setDiscoveries(value: Boolean) { showDiscoveries = value; refreshFog() }
+    fun overview() {
+        setFollowing(false)
+        val selectedMode = mode
+        scope.launch {
+            try {
+                val extent = withContext(Dispatchers.IO) { app.repository.extent(selectedMode) }
+                if (mode != selectedMode) return@launch
+                if (extent == null) { message("Ainda não há descobertas neste modo."); return@launch }
+                val size = ExplorationConfig.CELL_PROJECTED_METERS
+                val bounds = LatLngBounds.Builder().includes(listOf(
+                    LatLng(Geo.latitude(extent.minY * size), Geo.longitude(extent.minX * size)),
+                    LatLng(Geo.latitude((extent.maxY + 1.0) * size), Geo.longitude((extent.maxX + 1.0) * size)))).build()
+                if (view.width > 0 && view.height > 0) {
+                    val top = topInset + density * 112
+                    val bottom = bottomInset + density * 200
+                    val factor = (view.height * .6f / (top + bottom)).coerceAtMost(1f)
+                    val side = (density * 32).toInt().coerceAtMost(view.width / 5)
+                    map?.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, side, (top * factor).toInt(), side, (bottom * factor).toInt()))
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { message("Não foi possível abrir a visão geral. Tente novamente.") }
+        }
+    }
     fun setTrace(value: RecordedTrace?, head: TraceSample? = null) {
         trace = value
         liveHead = head
@@ -230,24 +266,53 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         fogJob?.cancel()
         fogJob = scope.launch {
             delay(250) // Coalesce location and camera changes; cancellation rejects stale results.
+            val viewBounds = Geo.viewportBounds(bounds.latitudeSouth, bounds.longitudeWest, bounds.latitudeNorth, bounds.longitudeEast)
+            suspend fun showCoverage() {
+                val coverage = withContext(Dispatchers.IO) { viewBounds.flatMap { app.repository.coverage(selectedMode, it) } }
+                val json = withContext(Dispatchers.Default) { CoverageGeometry.geoJson(coverage) }
+                ensureActive()
+                if (request == generation && style === s) {
+                    s.getSourceAs<GeoJsonSource>("fog")?.setGeoJson(FogGeometry.geoJson(emptyList()))
+                    s.getSourceAs<GeoJsonSource>("coverage")?.setGeoJson(json)
+                    s.getSourceAs<GeoJsonSource>("discoveries")?.setGeoJson(emptyFeatures)
+                    fogWarning = "Visão geral • cobertura aproximada em verde. Aproxime para ver os limites reais."
+                    publishMessage()
+                }
+            }
             try {
+                if (m.cameraPosition.zoom < 12) {
+                    showCoverage()
+                    return@launch
+                }
                 val cells = withContext(Dispatchers.IO) {
                     // The SDK can return unwrapped longitudes such as 179..181.
-                    Geo.viewportBounds(bounds.latitudeSouth, bounds.longitudeWest, bounds.latitudeNorth, bounds.longitudeEast)
-                        .flatMap { app.repository.visible(selectedMode, it) }
+                    viewBounds.flatMap { app.repository.visible(selectedMode, it) }
                 }
+                val discoveries = if (showDiscoveries) withContext(Dispatchers.IO) {
+                    viewBounds.flatMap { app.repository.discoveries(selectedMode, it) }
+                } else emptyList()
                 val json = withContext(Dispatchers.Default) {
                     fogMutex.withLock { ensureActive(); FogGeometry.geoJson(cells.distinct()) }
                 }
+                val newJson = withContext(Dispatchers.Default) { CoverageGeometry.geoJson(CoverageGeometry.rows(discoveries)) }
                 ensureActive()
                 if (request == generation && style === s) {
                     s.getSourceAs<GeoJsonSource>("fog")?.setGeoJson(json)
+                    s.getSourceAs<GeoJsonSource>("coverage")?.setGeoJson(emptyFeatures)
+                    s.getSourceAs<GeoJsonSource>("discoveries")?.setGeoJson(newJson)
                     if (fogWarning.isNotEmpty()) { fogWarning = ""; publishMessage() }
                 }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
+                if (e is IllegalStateException && e.message?.startsWith("Aproxime") == true) {
+                    try { showCoverage(); return@launch }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { /* Continue with conservative fog on storage failure. */ }
+                }
                 // Conservative fallback: never reveal an unexplored place on failure.
                 s.getSourceAs<GeoJsonSource>("fog")?.setGeoJson(FogGeometry.geoJson(emptyList()))
+                s.getSourceAs<GeoJsonSource>("coverage")?.setGeoJson(emptyFeatures)
+                s.getSourceAs<GeoJsonSource>("discoveries")?.setGeoJson(emptyFeatures)
                 fogWarning = "Aproxime o mapa para visualizar a exploração. Se persistir, confira o armazenamento."
                 publishMessage()
             }

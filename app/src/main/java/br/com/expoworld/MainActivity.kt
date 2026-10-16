@@ -28,11 +28,15 @@ import br.com.expoworld.core.ExplorationProgress
 import br.com.expoworld.core.TracePresentation
 import br.com.expoworld.core.GpsSignal
 import br.com.expoworld.core.GpsQuality
+import br.com.expoworld.core.SimulationScenario
+import br.com.expoworld.storage.BackupManager
 import br.com.expoworld.location.*
 import br.com.expoworld.ui.WorldMap
 import br.com.expoworld.ui.ExplorationScreen
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import org.maplibre.android.MapLibre
 
 class MainActivity : ComponentActivity() {
@@ -45,6 +49,24 @@ class MainActivity : ComponentActivity() {
     private val dialog = mutableStateOf("")
     private val permissionVersion = mutableIntStateOf(0)
     private var pendingStart = false
+    private val storageBusy = mutableStateOf(false)
+    private val storageMessage = mutableStateOf("")
+    private val exportBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        uri?.let { runBackup { "Backup salvo: ${BackupManager(app).export(it)} células reais. Guarde o arquivo para restaurar em outro aparelho." } }
+    }
+    private val importBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { runBackup { "Restauração concluída: ${BackupManager(app).restore(it)} células novas adicionadas. Seus dados anteriores foram preservados." } }
+    }
+    private fun runBackup(action: suspend () -> String) {
+        if (app.tracking.value.active || app.storageBusy) { storageMessage.value = "Encerre a viagem antes de usar o backup."; return }
+        app.storageBusy = true; storageBusy.value = true; storageMessage.value = "Processando arquivo…"
+        lifecycleScope.launch {
+            try { storageMessage.value = action(); worldMap.refreshFog() }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { storageMessage.value = "Não foi possível concluir o backup/restauração. Confira o arquivo e o espaço livre. Nenhuma exploração anterior foi apagada." }
+            finally { app.storageBusy = false; storageBusy.value = false }
+        }
+    }
     private val manager get() = getSystemService(LocationManager::class.java)
     private val preview = object : LocationListener {
         override fun onLocationChanged(location: Location) {
@@ -108,6 +130,7 @@ class MainActivity : ComponentActivity() {
         else startReal()
     }
     private fun startReal() {
+        if (app.storageBusy) return
         if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) { pendingStart = true; return }
         pendingStart = false
         if (app.tracking.value.active) return
@@ -120,7 +143,7 @@ class MainActivity : ComponentActivity() {
         else startService(Intent(this, ExplorationService::class.java).setAction(ExplorationService.STOP))
     }
     private fun startPreview() {
-        if (!fineGranted() || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
+        if (app.tracking.value.active || !fineGranted() || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
         try {
             manager.removeUpdates(preview)
             manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2000L, 5f, preview, Looper.getMainLooper())
@@ -136,6 +159,10 @@ class MainActivity : ComponentActivity() {
             while (true) { value = SystemClock.elapsedRealtimeNanos() / 1e9; delay(2000) }
         }
         var simulatedView by rememberSaveable { mutableStateOf(false) }
+        var scenarioIndex by rememberSaveable { mutableIntStateOf(0) }
+        var highlight by rememberSaveable { mutableStateOf(false) }
+        val preferences = remember { getSharedPreferences("map", MODE_PRIVATE) }
+        var fogOpacity by remember { mutableFloatStateOf(preferences.getFloat("fogOpacity", .55f).coerceIn(.2f, .8f)) }
         val viewMode = if (state.active) { if (state.simulated) "simulation" else "real" } else if (simulatedView) "simulation" else "real"
         val progressFlow = remember(viewMode) { app.repository.progress(viewMode) }
         val progressValue by progressFlow.collectAsStateWithLifecycle(ExplorationProgress(mode = viewMode))
@@ -151,6 +178,11 @@ class MainActivity : ComponentActivity() {
         val currentDialog by dialog
         val permissionsRevision by permissionVersion
         val precise = remember(permissionsRevision) { fineGranted() }
+        LaunchedEffect(state.active) {
+            if (state.active) { manager.removeUpdates(preview); highlight = false } else startPreview()
+        }
+        LaunchedEffect(highlight, state.active, viewMode) { worldMap.setDiscoveries(highlight && !state.active) }
+        LaunchedEffect(fogOpacity) { worldMap.setFogOpacity(fogOpacity) }
         LaunchedEffect(viewMode, progress.cells) { worldMap.setMode(viewMode) }
         LaunchedEffect(state.position, viewMode) { worldMap.updatePosition(state.position.takeIf { state.simulated == (viewMode == "simulation") }) }
         LaunchedEffect(state.active, route?.startedAtMillis, route?.completed, viewMode) {
@@ -182,6 +214,21 @@ class MainActivity : ComponentActivity() {
             mapStatus = mapStatus,
             precise = precise,
             gpsSignal = gpsSignal,
+            fogOpacity = fogOpacity,
+            onFogOpacityChange = { fogOpacity = it; preferences.edit().putFloat("fogOpacity", it).apply() },
+            highlight = highlight,
+            onHighlightChange = { highlight = it },
+            onOverview = { worldMap.overview() },
+            onPauseToggle = {
+                if (state.simulated) simulation.togglePause()
+                else startService(Intent(this, ExplorationService::class.java).setAction(if (state.paused) ExplorationService.RESUME else ExplorationService.PAUSE))
+            },
+            scenario = SimulationScenario.entries[scenarioIndex],
+            onScenarioChange = { scenarioIndex = it.ordinal },
+            storageBusy = storageBusy.value,
+            storageMessage = storageMessage.value,
+            onExport = { exportBackup.launch("expo-world-${java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date())}.expoworld") },
+            onImport = { importBackup.launch(arrayOf("application/octet-stream", "text/plain", "*/*")) },
             trace = displayedRoute,
             traceVisible = traceVisible,
             onTraceVisibleChange = { traceVisible = it },
@@ -189,8 +236,9 @@ class MainActivity : ComponentActivity() {
             notificationsHidden = state.active && !state.simulated && Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED,
             onSimulationChange = { simulatedView = it },
             onTripToggle = {
-                if (state.active) stopTrip()
-                else if (viewMode == "simulation") simulation.start(lifecycleScope)
+                if (app.storageBusy) Unit
+                else if (state.active) stopTrip()
+                else if (viewMode == "simulation") simulation.start(lifecycleScope, SimulationScenario.entries[scenarioIndex])
                 else prepareStart()
             },
             onCenter = { if (!precise && viewMode == "real") requestLocation(false) else {
