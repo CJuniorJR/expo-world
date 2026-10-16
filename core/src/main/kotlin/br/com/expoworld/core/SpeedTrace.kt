@@ -16,8 +16,24 @@ data class TraceSample(
     val speedKmh: Double?, val breakBefore: Boolean, val stopId: Int, val stopSeconds: Double
 )
 data class RecordedTrace(val startedAtMillis: Long, val endedAtMillis: Long, val samples: List<TraceSample>,
-    val mode: String = "real", val completed: Boolean = true)
+    val mode: String = "real", val completed: Boolean = true, val newAreaSquareMeters: Double? = null) {
+    fun isInterrupted(active: Boolean) = !active && !completed && samples.isNotEmpty()
+}
 data class TraceStop(val latitude: Double, val longitude: Double, val durationSeconds: Double)
+
+/** Frozen history changes only when another chunk fills; the recent tail is bounded. */
+data class TraceWindow(val history: List<TraceSample>, val recent: List<TraceSample>)
+object TraceChunks {
+    const val SIZE = 256
+    fun split(samples: List<TraceSample>): TraceWindow {
+        if (samples.isEmpty()) return TraceWindow(emptyList(), emptyList())
+        val boundary = ((samples.size - 1) / SIZE) * SIZE
+        return TraceWindow(if (boundary == 0) emptyList() else samples.subList(0, boundary + 1),
+            samples.subList(boundary, samples.size))
+    }
+    fun live(samples: List<TraceSample>, head: TraceSample?): List<TraceSample> =
+        TracePresentation.withLiveHead(samples.takeLast(1), head)
+}
 
 /** Called only for fixes accepted by FixFilter. GPS speed is preferred; fallback
  * displacement uses a >=4-second window and requires accuracy <=10 m.

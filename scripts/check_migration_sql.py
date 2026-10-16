@@ -12,11 +12,11 @@ from pathlib import Path
 root = Path(__file__).resolve().parent.parent
 schemas = root / "app/schemas/br.com.expoworld.storage.ExplorationDatabase"
 old_schema = json.loads((schemas / "1.json").read_text(encoding="utf-8"))
-new_schema = json.loads((schemas / "3.json").read_text(encoding="utf-8"))
+new_schema = json.loads((schemas / "4.json").read_text(encoding="utf-8"))
 source = (root / "app/src/main/java/br/com/expoworld/storage/ExplorationDatabase.kt").read_text(encoding="utf-8")
 migration = re.findall(r'db\.execSQL\("([^"\n]+)"\)', source)
 queries = re.findall(r'@Query\("([^"\n]+)"\)', source)
-assert len(migration) == 6
+assert len(migration) == 7
 
 def query(prefix):
     return next(q for q in queries if q.startswith(prefix))
@@ -33,7 +33,12 @@ db.execute("INSERT INTO cells VALUES ('simulation', -3, 5)")
 db.commit()
 with db:
     for statement in migration:
+        if statement.startswith("ALTER TABLE route_sessions ADD COLUMN"):
+            db.execute("INSERT INTO route_sessions VALUES ('legacy', 500, NULL, 0)")
+            db.execute("INSERT INTO route_samples VALUES ('legacy', 0, 0, 0, 0, 10, 1, -1, 0)")
         db.execute(statement)
+assert db.execute("SELECT newAreaSquareMeters FROM route_sessions WHERE mode = 'legacy'").fetchone() == (None,)
+assert db.execute("SELECT completed FROM route_sessions WHERE mode = 'legacy'").fetchone() == (0,)
 
 # Compare migration results to the compiler-exported Room schema, including PK
 # ordering and nullability. This catches destructive or incompatible SQL changes.
@@ -49,12 +54,12 @@ assert set(db.execute("SELECT y, x FROM cells WHERE mode = 'real'").fetchall()) 
 assert set(db.execute("SELECT y, x FROM cells WHERE mode = 'simulation'").fetchall()) == {(-6, 10), (-6, 11), (-5, 10), (-5, 11)}
 
 with db:
-    db.execute("INSERT INTO route_sessions VALUES ('real', 1000, NULL, 0)")
+    db.execute("INSERT INTO route_sessions(mode, startedAtMillis, endedAtMillis, completed) VALUES ('real', 1000, NULL, 0)")
     db.execute("INSERT INTO route_samples VALUES ('real', 0, 0, 0, 0, 54, 1, -1, 0)")
     db.execute("INSERT INTO route_samples VALUES ('simulation', 0, 0, 0, 0, 0, 1, 0, 10)")
 assert db.execute(query("SELECT * FROM route_sessions"), {"mode": "real"}).fetchone() is None
 with db:
-    db.execute(query("UPDATE route_sessions"), {"mode": "real", "endedAt": 2000})
+    db.execute(query("UPDATE route_sessions SET completed"), {"mode": "real", "endedAt": 2000})
 db.close()
 
 db = sqlite3.connect(path)
@@ -81,4 +86,23 @@ assert db.execute("SELECT COUNT(*) FROM cells WHERE mode = 'real'").fetchone()[0
 assert db.execute(query("SELECT * FROM route_samples"), {"mode": "real"}).fetchall() == []
 assert len(db.execute(query("SELECT * FROM route_samples"), {"mode": "simulation"}).fetchall()) == 1
 db.close()
-print("PASS: migration 1->2->3 matches Room schema, preserves old cell coverage including negative coordinates, survives reopen, isolates modes, trims samples and rolls back atomic writes (host SQLite).")
+db = sqlite3.connect(path)
+# A new trip counts only successful INSERT OR IGNORE rows, atomically with cells.
+with db:
+    db.execute("UPDATE route_sessions SET newAreaSquareMeters = 0 WHERE mode = 'real'")
+    for x in (200, 200, 201):
+        inserted = db.execute("INSERT OR IGNORE INTO cells VALUES ('real', 0, ?)", (x,)).rowcount
+        db.execute(query("UPDATE route_sessions SET newAreaSquareMeters"), {"mode": "real", "area": inserted * 100.0})
+assert db.execute("SELECT newAreaSquareMeters FROM route_sessions WHERE mode = 'real'").fetchone() == (200.0,)
+try:
+    with db:
+        db.execute("INSERT INTO cells VALUES ('real', 0, 202)")
+        db.execute(query("UPDATE route_sessions SET newAreaSquareMeters"), {"mode": "real", "area": 100.0})
+        raise RuntimeError("simulated area transaction failure")
+except RuntimeError:
+    pass
+assert db.execute("SELECT newAreaSquareMeters FROM route_sessions WHERE mode = 'real'").fetchone() == (200.0,)
+assert db.execute("SELECT COUNT(*) FROM cells WHERE mode = 'real' AND x = 202").fetchone() == (0,)
+db.close()
+print("PASS: migration 1->2->3->4 matches Room schema; preserves coverage, interrupted legacy route and unknown area; reopen, isolation, trimming, unique new area and transaction rollback (host SQLite).")
+

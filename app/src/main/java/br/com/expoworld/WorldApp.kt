@@ -11,6 +11,7 @@ data class TrackingState(
     val active: Boolean = false,
     val simulated: Boolean = false,
     val position: Fix? = null,
+    val gpsFix: Fix? = null,
     val liveHead: TraceSample? = null,
     val message: String = "Solicite localização para ver sua posição. A exploração começa ao iniciar uma viagem.",
     val revision: Long = 0
@@ -18,6 +19,6 @@ data class TrackingState(
 
 class WorldApp : Application() {
     val tracking = MutableStateFlow(TrackingState())
-    val database by lazy { Room.databaseBuilder(this, ExplorationDatabase::class.java, "exploration.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3).build() }
+    val database by lazy { Room.databaseBuilder(this, ExplorationDatabase::class.java, "exploration.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build() }
     val repository by lazy { ExplorationRepository(database.cells()) }
 }

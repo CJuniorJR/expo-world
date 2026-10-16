@@ -20,7 +20,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 data class ExploredCell(val mode: String, val y: Int, val x: Int)
 
 @Entity(tableName = "route_sessions")
-data class RouteSession(@PrimaryKey val mode: String, val startedAtMillis: Long, val endedAtMillis: Long?, val completed: Boolean)
+data class RouteSession(@PrimaryKey val mode: String, val startedAtMillis: Long, val endedAtMillis: Long?, val completed: Boolean,
+    @ColumnInfo(defaultValue = "NULL") val newAreaSquareMeters: Double? = null)
 
 @Entity(tableName = "route_samples", primaryKeys = ["mode", "sequence"])
 data class RouteSampleRow(
@@ -42,7 +43,9 @@ private fun TraceSample.toRow(mode: String) = RouteSampleRow(mode, sequence, lat
 @Dao
 interface ExplorationDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insert(cells: List<ExploredCell>)
+    suspend fun insert(cells: List<ExploredCell>): List<Long>
+    @Query("UPDATE route_sessions SET newAreaSquareMeters = newAreaSquareMeters + :area WHERE mode = :mode")
+    suspend fun addNewArea(mode: String, area: Double)
     @Query("SELECT * FROM cells WHERE mode = :mode AND y BETWEEN :minY AND :maxY AND x BETWEEN :minX AND :maxX LIMIT :limit")
     suspend fun visible(mode: String, minX: Int, maxX: Int, minY: Int, maxY: Int, limit: Int): List<ExploredCell>
     @Query("SELECT COUNT(*) FROM cells WHERE mode = :mode")
@@ -73,12 +76,18 @@ interface ExplorationDao {
     @Transaction
     suspend fun beginRoute(mode: String, startedAt: Long) {
         deleteSamples(mode)
-        putSession(RouteSession(mode, startedAt, null, false))
+        putSession(RouteSession(mode, startedAt, null, false, 0.0))
     }
     @Transaction
     suspend fun saveAccepted(cells: List<ExploredCell>, sample: RouteSampleRow?, startedAt: Long?) {
         if (sample != null && startedAt != null) beginRoute(sample.mode, startedAt)
-        insert(cells)
+        val inserted = insert(cells)
+        val fresh = cells.filterIndexed { index, _ -> inserted[index] != -1L }
+        if (fresh.isNotEmpty()) {
+            val area = br.com.expoworld.core.ExplorationProgress.fromRows(
+                fresh.groupingBy { it.y }.eachCount().map { it.key to it.value.toLong() }).areaSquareMeters
+            addNewArea(fresh.first().mode, area)
+        }
         if (sample != null) {
             putSample(sample)
             trimSamples(sample.mode, sample.sequence - TraceConfig.MAX_SAMPLES + 1)
@@ -95,7 +104,7 @@ interface ExplorationDao {
     }
 }
 
-@Database(entities = [ExploredCell::class, RouteSession::class, RouteSampleRow::class], version = 3, exportSchema = true)
+@Database(entities = [ExploredCell::class, RouteSession::class, RouteSampleRow::class], version = 4, exportSchema = true)
 abstract class ExplorationDatabase : RoomDatabase() { abstract fun cells(): ExplorationDao }
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -114,6 +123,12 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE route_sessions ADD COLUMN newAreaSquareMeters REAL DEFAULT NULL")
+    }
+}
+
 class ExplorationRepository(private val dao: ExplorationDao) {
     suspend fun save(mode: String, cells: Set<Cell>) {
         // One Room transaction per accepted fix; committed before UI revision changes.
@@ -126,7 +141,7 @@ class ExplorationRepository(private val dao: ExplorationDao) {
     suspend fun finishRoute(mode: String, last: TraceSample?) = dao.finishRoute(mode, System.currentTimeMillis(), last?.toRow(mode))
     fun route(mode: String): Flow<RecordedTrace?> = dao.routeSnapshot(mode).map { snapshot ->
         snapshot?.let { RecordedTrace(it.session.startedAtMillis, it.session.endedAtMillis ?: it.session.startedAtMillis,
-            it.samples.sortedBy { row -> row.sequence }.map { row -> row.toDomain() }, mode, it.session.completed) }
+            it.samples.sortedBy { row -> row.sequence }.map { row -> row.toDomain() }, mode, it.session.completed, it.session.newAreaSquareMeters) }
     }.flowOn(Dispatchers.Default)
     fun completedRoute(mode: String): Flow<RecordedTrace?> = route(mode).map { it?.takeIf { data -> data.completed } }
     fun progress(mode: String): Flow<br.com.expoworld.core.ExplorationProgress> = dao.progressRows(mode).map { rows ->
