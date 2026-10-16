@@ -1,55 +1,58 @@
-# Validação — 15/10/2026 — versão 0.3.0
+# Validação — 15/10/2026 — versão 0.4.0
 
-## Resultado executado
+## Verificações executadas
 
 ```text
 gradlew.bat :core:test :app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest --console=plain
 BUILD SUCCESSFUL
 ```
 
-JDK 17, Gradle 8.13, SDK Platform 36 e Build Tools 35.0.0. A execução final levou 14 s; as compilações incrementais reutilizaram os resultados dos testes JVM executados nesta alteração.
+JDK 17, Gradle 8.13, SDK Platform 36, Build Tools 35.0.0. Compilação final: 14 s. Testes JVM executados na primeira compilação desta alteração; a compilação incremental final reutilizou os resultados UP-TO-DATE.
 
-- **40 testes JVM aprovados**, sem falhas/erros/ignorados: 19 de exploração, 11 de velocidade/rastro, 5 de progresso/resumo, 3 de recuperação/divisão do rastro e 2 de sinal/círculo de precisão.
-- Novos testes verificam classificação de percurso interrompido, cobertura de todas as arestas ao dividir até 20 mil pontos em blocos, estabilidade do histórico entre blocos, ponta ao vivo limitada e lacunas; qualidade/expiração do GPS; círculo de precisão em metros em diferentes latitudes, fechamento e proteção no antimeridiano.
-- App e APK dos testes Android compilados.
-- **Lint: 0 erros, 11 avisos**. Sem atualização de dependências nesta versão.
-- scripts/check_migration_sql.py executado e aprovado: migrações 1→2→3→4 compatíveis com o schema Room 4; exploração positiva/negativa e percurso legado incompleto preservados, área antiga desconhecida, reabertura, isolamento, retenção, novas células sem duplicação e rollback de área/células.
-- A verificação Python usa SQLite do computador; não é execução de Room no Android. Room/KSP gerou o DAO com retorno de IDs do INSERT OR IGNORE e transação para células/área/amostra.
-- Assinatura do APK verificada com apksigner, retorno 0; mesmo certificado da versão 0.2.0.
-- aapt confirmou br.com.expoworld, versionCode 6, versionName 0.3.0, mínimo API 23, alvo API 36.
+- **47 testes JVM aprovados**, sem falhas/erros/ignorados. Incluem os 40 anteriores, quatro de backup e três de cobertura, pausa e cenários adversos.
+- Backup: round-trip vazio e coordenadas negativas; arquivo corrompido, truncado, versão/tamanho de grade incompatíveis, contagem errada, dados extras, linhas grandes/coordenadas impossíveis; streaming de 20 mil células.
+- Exploração: destaque por faixas sem preencher lacunas; simulações de túnel, oscilação, salto e recuperação pelo filtro real; pausa curta/longa rompe continuidade e impede linhas artificiais.
+- App e APK de testes Android compilados.
+- **Lint: 0 erros, 12 avisos**: atualizações de ferramentas/dependências, regra de backup legada e sugestão de SharedPreferences KTX. Há aviso de callback legado de localização no compilador. Nenhuma dependência atualizada nesta versão.
+- scripts/check_migration_sql.py executado e aprovado: migrações 1→2→3→4→5 compatíveis com o schema Room 5; células e percursos preservados; destaque antigo vazio; agrupamento correto de coordenadas negativas; paginação de exportação; área sem duplicação, isolamento e rollback.
+- A verificação Python usa SQLite do computador e não substitui Room no Android. Schemas/DAOs foram gerados por Room/KSP.
+- Assinatura: apksigner verify retornou 0; certificado igual ao APK 0.3.0, permitindo atualização.
+- aapt: br.com.expoworld, versionCode 7, versionName 0.4.0, mínimo API 23, alvo API 36.
+- git diff --check executado sem erros.
 
-## APK entregue
+## APK
 
-`dist/expo-world-0.3.0-debug.apk` — 62.141.356 bytes.
+`dist/expo-world-0.4.0-debug.apk` — 62.138.893 bytes.
 
 SHA-256:
 
 ```text
-A4F9F6223C190EBA7F812B7D74F6749162B1CC897037E46B6ADF1C3DA7E958E1
+6F45DEA4B97CDB161414AEA093466AEA8B21FED54E26AD28FE2F55CF170201BB
 ```
 
-Instalar como atualização, sem desinstalar. dist, local.properties, caches e ferramentas estão ignorados pelo Git. A chave do provedor não está no código versionado; o APK usa a configuração local existente.
+Instale como atualização, sem desinstalar. A chave MapTiler permanece no arquivo local ignorado e é usada no APK. Nenhuma chave, APK, backup de usuário ou ferramenta local é versionada.
 
-## Pendente no Android
+## Testes Android pendentes
 
-adb devices -l foi executado nesta entrega e não encontrou dispositivo. **Cinco testes instrumentados foram compilados, mas não executados.** O novo teste verifica percurso incompleto e área nova após reabertura do banco, repetição de células e zeragem da área numa viagem nova.
+adb devices -l executado nesta rodada: nenhum celular/emulador conectado. **Seis testes instrumentados compilados, mas não executados.** O novo teste verifica destaque de células realmente novas, extensão territorial, preservação de rastro/área durante uma mesclagem, paginação e isolamento/limpeza por modo.
 
-Não houve abertura/instalação automatizada do aplicativo, captura visual Android ou teste de serviço em runtime. Conferir em aparelho:
+Não houve instalação, abertura, captura Android, benchmark ou teste com sensor real. Precisam de aparelho:
 
-1. Atualizar preservando exploração e rastro antigo; área nova antiga deve ser indisponível.
-2. Iniciar viagem e conferir precisão em metros no mapa/menu e círculo azul. Perder sinal por mais de 10 s deve remover o círculo e indicar ausência de sinal recente.
-3. Conferir rastro e rupturas de sinal ao vivo; usar simulação para comparar trechos rápidos, lentos e parada.
-4. Encerrar e consultar área nova; repetir locais deve acrescentar apenas células antes desconhecidas, considerando variação do GPS.
-5. Forçar parada durante uma viagem com dados gravados e reabrir: exibir percurso interrompido e trecho salvo, sem reiniciar gravação. Últimas leituras não confirmadas podem faltar.
-6. Iniciar nova viagem sem pontos válidos e encerrar: preservar rastro anterior. Primeiro ponto válido de outra viagem substitui o anterior sem conectar os trajetos.
-7. Conferir bloqueio da tela, segundo plano, encerramento pela notificação, permissões, GPS desligado e falta de internet.
+1. Atualização 0.3.0→0.4.0 preservando área e rastro, sem inventar destaque antigo.
+2. Exportar pelo seletor Android; restaurar arquivo válido, duplicado, corrompido e cancelado. Conferir permissões URI, provedores de arquivos, pouco espaço e rotação durante operação. Validação de formato e SQL no computador não substitui esse fluxo.
+3. Visão geral de regiões pequenas/grandes e desconectadas; texto de cobertura aproximada; retorno ao detalhe; rotação, telas pequenas, fontes ampliadas e antimeridiano.
+4. Névoa de 20% a 80%, persistência após reabrir; destaque dourado por dois minutos e reativação manual.
+5. Resumo automático após encerrar com dados; sem resumo antigo ao encerrar sem pontos; abertura manual de percurso recuperado.
+6. Pausa/continuação pela interface e notificação: parar atualizações, manter a mesma viagem e quebrar o segmento; encerrar enquanto pausado. Conferir fila em processamento e permissões/GPS revogados durante pausa.
+7. Todos os cenários simulados; pausa curta/longa. A simulação roda apenas com a tela em primeiro plano e não testa o serviço.
+8. Viagem real com tela bloqueada, falta de internet, retorno do sinal e recuperação após morte do processo. Não existe funcionamento prometido após parada forçada.
 
-## Limites conhecidos
+## Limites
 
-A recuperação consulta o rastro persistido, sem retomar o serviço. START_NOT_STICKY permanece. Não há registro após parada forçada nem recuperação de leituras que só estavam em memória. Somente o último percurso de cada modo, até 20 mil amostras; área nova cobre a viagem inteira, mesmo quando o rastro é parcial.
+Backup inclui somente exploração real em grade de 10 m, até 5 milhões de células/128 MB. Importação mescla sem apagar células, simulação ou rastro existente e sem atribuir área importada ao último percurso. Não inclui histórico/rastro, preferências, chave ou criptografia. O checksum detecta inconsistência, não autentica a origem. Arquivos contêm lugares visitados e são gravados no destino escolhido pelo usuário. Não há envio automático à rede.
 
-A otimização reduz reconstruções e uploads de geometria da ponta ao vivo; não foi feito benchmark de FPS, memória ou bateria em Android. Snapshots Room e cálculo de paradas ainda percorrem amostras persistidas. O histórico é reconstruído ao fechar bloco, recarregar estilo ou descartar pontos antigos pelo limite.
+Destaque de novas células existe apenas para viagens iniciadas nesta versão. Na visão ampla, a cobertura verde é uma agregação aproximada e pode incluir espaços não visitados; não é revelação detalhada nem modifica o banco. A névoa precisa permanece limitada a 60 mil células no detalhe. Até 4000 blocos por parte visível (duas perto do antimeridiano); consultas usam agregação SQLite e não carregam todo o território em memória.
 
-Precisão é estimativa do sensor; leituras acima de 20 m continuam sem revelar exploração. O círculo não representa probabilidade garantida; é omitido para valores inválidos, acima de 10 km ou cruzando limites geográficos suportados. Simulação não valida GPS real ou segundo plano.
+Pausa mantém serviço/notificação, remove atualizações do serviço e interrompe continuidade. Leituras já em processamento podem terminar de ser salvas. Reabertura após morte do processo recupera dados em disco, sem retomar a viagem. O tempo entre amostras inclui pausas; o resumo identifica tempo sem registro sem distinguir pausa de falha de sinal.
 
-Faixa nominal de 50 m, grade de 10 m projetados, arredondamento conservador, até 60 mil células por viewport e latitude ±85°. Área total/nova são estimativas com correção por latitude. Sem mapas offline completos. Nenhuma consulta HTTP com a chave MapTiler foi executada no computador; carregamento, cotas e restrições dependem de teste no aparelho.
+Rastro limitado a 20 mil amostras por modo; área nova cobre a viagem inteira. Otimização em blocos permanece, sem benchmark Android de FPS/bateria/memória. A experiência visual e o comportamento de fabricante ainda aguardam teste real. Sem mapas offline completos. Não houve consulta HTTP com chave MapTiler no computador nesta entrega.

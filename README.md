@@ -18,13 +18,13 @@ Sem chave/URL de estilo, há um fundo neutro com orientação clara. Ele permite
 python scripts/check_migration_sql.py
 ```
 
-O APK, quando compilado, fica em `app/build/outputs/apk/debug/app-debug.apk`. A entrega atual também está em `dist/expo-world-0.3.0-debug.apk`. O teste conectado exige um Android conectado por ADB ou emulador iniciado. A verificação Python usa a biblioteca padrão para testar o SQL das migrações em SQLite do computador, sem substituir o teste Room no Android. Relatórios: `core/build/reports/tests/test/index.html` e `app/build/reports/lint-results-debug.html`.
+O APK, quando compilado, fica em `app/build/outputs/apk/debug/app-debug.apk`. A entrega atual também está em `dist/expo-world-0.4.0-debug.apk`. O teste conectado exige um Android conectado por ADB ou emulador iniciado. A verificação Python usa a biblioteca padrão para testar o SQL das migrações em SQLite do computador, sem substituir o teste Room no Android. Relatórios: `core/build/reports/tests/test/index.html` e `app/build/reports/lint-results-debug.html`.
 
 `scripts/bootstrap-build.ps1` pode baixar JDK 17 em `.tools` e executar a compilação, sem alterar a instalação de Java do sistema. `-InstallAndroidSdk` também instala ferramentas Android locais e apresenta as licenças do SDK para revisão/aceitação. O script precisa de acesso à internet; downloads e caches não são versionados. Se já tiver SDK instalado, defina `ANDROID_HOME` ou `sdk.dir`. A primeira execução baixa o Gradle e as dependências.
 
 ## Uso em aparelho
 
-Na versão 0.3.0 o mapa ocupa a tela inteira, com controles flutuantes e névoa mais suave. O botão de menu (três linhas, no alto à direita) abre um painel com progresso, resumo do percurso, estado do GPS, rastro por velocidade, permissões e modo simulado. Toque fora do painel, deslize-o para baixo ou use o botão de fechar para voltar ao mapa. O botão com uma mira centraliza sua posição; iniciar/encerrar continua acessível sobre o mapa. A atribuição permanece visível com o menu fechado.
+Na versão 0.4.0 o mapa ocupa a tela inteira, com controles flutuantes e névoa mais suave. O botão de menu (três linhas, no alto à direita) abre um painel com progresso, resumo do percurso, estado do GPS, rastro por velocidade, permissões e modo simulado. Toque fora do painel, deslize-o para baixo ou use o botão de fechar para voltar ao mapa. O botão com uma mira centraliza sua posição; iniciar/encerrar continua acessível sobre o mapa. A atribuição permanece visível com o menu fechado.
 
 Ao iniciar, o mapa acompanha a posição com transições de câmera. Mover ou girar o mapa com os dedos pausa esse acompanhamento; a mira retoma-o. O menu oferece **Acompanhar minha posição**. Isso só movimenta a câmera: não fornece navegação nem instruções de direção.
 
@@ -36,7 +36,28 @@ O painel mostra uma estimativa da **área descoberta** em m²/km², calculada a 
 
 O resumo do rastro mostra distância registrada, tempo entre registros, duração aproximada parado e ritmo médio GPS. A distância ignora lacunas e deriva entre leituras do mesmo grupo de parada. A média usa as velocidades conhecidas ponderadas pelo tempo; velocidade desconhecida não vira zero. A aquisição inicial do GPS não faz parte do tempo entre registros. Se o limite de amostras foi ultrapassado, o resumo é marcado como parcial. São estimativas para explorar o mapa, não um odômetro ou medição precisa de trânsito.
 
-## Novidades da versão 0.3.0
+## Novidades da versão 0.4.0
+
+O menu reúne as novas funções, mantendo o mapa em tela inteira:
+
+- **Backup e restauração:** Exportar cria um arquivo `.expoworld` com as células da exploração real. Restaurar valida versão, coordenadas, contagem e checksum SHA-256 antes de mesclar o arquivo numa transação; duplicatas não aumentam a área e nada é apagado. Não inclui rastro, simulação ou preferências. Usa o seletor [Storage Access Framework do Android](https://developer.android.com/training/data-storage/shared/documents-files), sem permissões amplas de armazenamento. Os arquivos são legíveis, sem criptografia, e contêm lugares visitados; o destino é escolhido pelo usuário. Não há upload pelo aplicativo. É preciso encerrar a viagem antes de usar os botões. Limites: 128 MB e 5 milhões de células por arquivo. Processamento em lotes de 1024 células, com cópia temporária no cache privado; importação inválida/cancelada não confirma alterações parciais.
+- **Visão geral:** Ver todas as descobertas enquadra o território do modo selecionado e desliga o acompanhamento da câmera. Abaixo de zoom 12 ou acima do limite de geometria detalhada, uma camada verde mostra cobertura aproximada, agregada em até 4000 retângulos por parte do viewport. Essa visualização não altera a exploração e pode abranger espaços não visitados entre células do mesmo bloco. A névoa permanece por baixo; aproximar retorna aos limites detalhados. O zoom mínimo agora é 2. Não requer carregar todas as células na memória.
+- **Destaque de descobertas:** viagens iniciadas na versão 0.4.0 guardam as células novas do último percurso numa tabela separada. Ao encerrar, elas ficam douradas por dois minutos na visão detalhada; o menu permite reativar ou esconder. O rastro por velocidade mantém suas cores. Viagens anteriores preservam área/rastro, mas não ganham destaque retroativo. A migração 4→5 apenas cria a tabela; começar outro percurso limpa só o destaque anterior daquele modo.
+- **Intensidade da névoa:** controle de 20% a 80%, salvo no aparelho. Ele altera apenas a aparência, sem revelar ou apagar células.
+- **Resumo ao encerrar:** abre automaticamente após uma viagem com dados, mostrando área nova, distância, tempo entre registros, paradas e presença de trechos sem continuidade. Pode ser reaberto pelo menu. Encerrar sem pontos não abre resumo do percurso anterior. Pausas e falta de sinal aparecem como tempo sem registro, sem inferir sua causa.
+- **Pausar e continuar:** no menu e na notificação da viagem real, pausa remove atualizações GPS do serviço, mantém a notificação e salva a ponta pendente. Continuar mantém a mesma viagem e cria um segmento independente; nenhum caminho é revelado entre os pontos antes/depois da pausa, mesmo numa pausa curta. Encerrar também funciona enquanto pausado. O GPS de prévia da atividade fica suspenso durante a viagem. Pausa não persiste como sessão retomável após morte do processo: reabrir mostra o rastro interrompido e permite começar outra viagem.
+- **Simulações adversas (debug):** escolha Percurso normal, Túnel sem sinal, GPS oscilando, Salto de posição ou Perda e retorno do sinal. Todos usam o filtro real e dados separados. Também é possível pausar a simulação. Os cenários levam cerca de dois minutos, além de pausas; não validam sensores, notificações ou segundo plano reais.
+
+### Testar as novas funções
+
+1. Execute cada cenário simulado, encerre e confira o resumo, as lacunas e o destaque dourado. O salto não deve gerar uma reta longa. A simulação termina ao sair do primeiro plano.
+2. Pause um percurso pelo menu, aguarde e continue: a linha recomeça em outro segmento. Repita a pausa/continuação pela notificação de uma viagem real.
+3. Ajuste a névoa, reabra o app e confira o valor. Use Ver todas as descobertas e aproxime/afaste: verde indica a visão aproximada; dourado indica células novas no detalhe.
+4. Exporte a exploração real; restaure o mesmo arquivo duas vezes. A segunda importação deve acrescentar zero células. Num outro aparelho, configure a chave do mapa e restaure o arquivo para consultar as descobertas.
+5. Selecione arquivo inválido/incompleto: deve aparecer orientação sem apagar dados. Encerre viagens antes de abrir o seletor de arquivos.
+6. Em aparelho real, confira bloqueio da tela, pausa, retorno, encerramento pela notificação, falta de internet e recuperação após interrupção. A ausência de um aparelho no ambiente impede validar esses itens aqui; consulte o relatório.
+
+## Recursos da versão 0.3.0
 
 - **Recuperação:** o último rastro incompleto é exibido automaticamente quando não há viagem ativa. O aviso distingue esse caso de um encerramento normal. O app recupera os dados em disco; não retoma o GPS, não conecta viagens diferentes e não promete registrar após parada forçada.
 - **Área nova por viagem:** o painel mostra a área de células inseridas pela primeira vez naquela viagem, com correção por latitude. Repetir locais soma zero. O valor é salvo atomicamente com as células, separado por modo, e permanece no percurso recuperado ou encerrado. O total vale para toda a viagem mesmo se o rastro atingir o limite de amostras. Percursos anteriores à versão 0.3.0 mostram área nova indisponível. A migração 3→4 preserva células e rastros.
@@ -89,7 +110,7 @@ Room faz `INSERT OR IGNORE` para as células por lote/fixação em transação. 
 
 Para renderizar, consultamos apenas células dentro do retângulo visível por índice `(mode,y,x)`. Comprimimos células adjacentes em faixas, fazemos união topológica com JTS e subtraímos do polígono mundial. Isso evita buracos sobrepostos inválidos. Cálculos e consultas ficam em dispatchers de trabalho; resultados antigos são cancelados ao mudar câmera/modo. A camada de névoa acompanha zoom, rotação e deslocamento do MapLibre.
 
-O zoom mínimo é **8**, máximo 20, para permitir uma visão mais ampla do rastro, e cada geometria de névoa é limitada a **60 mil células**. Ao exceder o limite, o app mantém a névoa conservadora e pede aproximação; o rastro continua visível acima dela. Essa escolha evita construir uma união mundial enorme. A exploração é suportada entre latitudes -85° e +85°. Nas bordas do antimeridiano, segmentos são separados; esse caso merece validação visual em aparelho. Não há compactação avançada de territórios continentais neste MVP.
+O zoom mínimo é **2**, máximo 20, para permitir uma visão mais ampla do rastro, e cada geometria de névoa é limitada a **60 mil células**. Em zoom menor que 12 ou ao exceder o limite, o app mantém a névoa e exibe uma cobertura aproximada em verde, com indicação para aproximar; o rastro continua visível acima dela. Essa escolha evita construir uma união mundial enorme. A exploração é suportada entre latitudes -85° e +85°. Nas bordas do antimeridiano, segmentos são separados; esse caso merece validação visual em aparelho. Não há compactação avançada de territórios continentais neste MVP.
 
 ## Mapa, dados e provedor
 
