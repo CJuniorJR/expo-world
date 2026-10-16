@@ -12,11 +12,13 @@ from pathlib import Path
 root = Path(__file__).resolve().parent.parent
 schemas = root / "app/schemas/br.com.expoworld.storage.ExplorationDatabase"
 old_schema = json.loads((schemas / "1.json").read_text(encoding="utf-8"))
-new_schema = json.loads((schemas / "3.json").read_text(encoding="utf-8"))
+new_schema = json.loads((schemas / "5.json").read_text(encoding="utf-8"))
 source = (root / "app/src/main/java/br/com/expoworld/storage/ExplorationDatabase.kt").read_text(encoding="utf-8")
-migration = re.findall(r'db\.execSQL\("([^"\n]+)"\)', source)
+blocks = re.findall(r'val MIGRATION_(\d+)_(\d+) = object.*?override fun migrate.*?\{(.*?)\n    }\n}', source, re.S)
+migrations = {int(start): re.findall(r'db\.execSQL\("([^"\n]+)"\)', body) for start, end, body in blocks}
+migration = [sql for start in sorted(migrations) for sql in migrations[start]]
 queries = re.findall(r'@Query\("([^"\n]+)"\)', source)
-assert len(migration) == 6
+assert sorted(migrations) == [1, 2, 3, 4]
 
 def query(prefix):
     return next(q for q in queries if q.startswith(prefix))
@@ -32,8 +34,14 @@ db.execute("INSERT INTO cells VALUES ('real', -1, -1)")
 db.execute("INSERT INTO cells VALUES ('simulation', -3, 5)")
 db.commit()
 with db:
-    for statement in migration:
+    for statement in [sql for start in [1, 2, 3] for sql in migrations[start]]:
         db.execute(statement)
+    db.execute("INSERT INTO route_sessions VALUES ('legacy', 10, 20, 1)")
+    db.execute("INSERT INTO saved_routes VALUES ('legacy', 'Preservado', 10)")
+    for statement in migrations[4]:
+        db.execute(statement)
+assert db.execute("SELECT activity FROM route_sessions WHERE mode='legacy'").fetchone() == ('car',)
+assert db.execute("SELECT title, activity FROM saved_routes WHERE id='legacy'").fetchone() == ('Preservado', 'car')
 
 # Compare migration results to the compiler-exported Room schema, including PK
 # ordering and nullability. This catches destructive or incompatible SQL changes.
@@ -49,16 +57,16 @@ assert set(db.execute("SELECT y, x FROM cells WHERE mode = 'real'").fetchall()) 
 assert set(db.execute("SELECT y, x FROM cells WHERE mode = 'simulation'").fetchall()) == {(-6, 10), (-6, 11), (-5, 10), (-5, 11)}
 
 with db:
-    db.execute("INSERT INTO route_sessions VALUES ('real', 1000, NULL, 0)")
+    db.execute("INSERT INTO route_sessions(mode, startedAtMillis, endedAtMillis, completed) VALUES ('real', 1000, NULL, 0)")
     db.execute("INSERT INTO route_samples VALUES ('real', 0, 0, 0, 0, 54, 1, -1, 0)")
     db.execute("INSERT INTO route_samples VALUES ('simulation', 0, 0, 0, 0, 0, 1, 0, 10)")
-assert db.execute(query("SELECT * FROM route_sessions"), {"mode": "real"}).fetchone() is None
+assert db.execute(query("SELECT * FROM route_sessions WHERE mode = :mode AND"), {"mode": "real"}).fetchone() is None
 with db:
     db.execute(query("UPDATE route_sessions"), {"mode": "real", "endedAt": 2000})
 db.close()
 
 db = sqlite3.connect(path)
-assert db.execute(query("SELECT * FROM route_sessions"), {"mode": "real"}).fetchone()[3] == 1
+assert db.execute(query("SELECT * FROM route_sessions WHERE mode = :mode AND"), {"mode": "real"}).fetchone()[3] == 1
 assert db.execute(query("SELECT * FROM route_samples"), {"mode": "real"}).fetchone()[5] == 54
 with db:
     db.execute("INSERT INTO route_samples VALUES ('real', 20001, 0, 0, 100, 0, 0, 0, 7)")
@@ -80,5 +88,16 @@ except RuntimeError:
 assert db.execute("SELECT COUNT(*) FROM cells WHERE mode = 'real'").fetchone()[0] == 8
 assert db.execute(query("SELECT * FROM route_samples"), {"mode": "real"}).fetchall() == []
 assert len(db.execute(query("SELECT * FROM route_samples"), {"mode": "simulation"}).fetchall()) == 1
+with db:
+    for mode, activity in [('real','walk'), ('real','walk'), ('real','bike'), ('simulation','walk')]:
+        db.execute("INSERT OR IGNORE INTO street_visits VALUES (?, ?, 'v1', 'street', 0, 'bairro', 10.0)", (mode, activity))
+assert db.execute("SELECT COUNT(*) FROM street_visits").fetchone()[0] == 3
+with db:
+    db.execute("INSERT INTO street_visits VALUES ('real', 'car', 'v1', 'street', 1, 'bairro', 10.0)")
+assert db.execute(query("SELECT neighborhoodId, SUM(meters)"), {'mode':'real','dataset':'v1'}).fetchone() == ('bairro', 20.0)
+assert db.execute(query("SELECT neighborhoodId, SUM(meters)"), {'mode':'real','dataset':'v2'}).fetchall() == []
+with db:
+    db.execute(query("DELETE FROM street_visits WHERE mode = 'simulation'"))
+assert db.execute("SELECT COUNT(*) FROM street_visits").fetchone()[0] == 3
 db.close()
-print("PASS: migration 1->2->3 matches Room schema, preserves old cell coverage including negative coordinates, survives reopen, isolates modes, trims samples and rolls back atomic writes (host SQLite).")
+print("PASS: migrations 1->2->3->4->5 match Room schema; old cells/trips/titles preserved, activity defaults to car, street visits deduplicate and share activities without double counting and isolate real/simulation/versions; retention, reopen and rollback verified (host SQLite).")

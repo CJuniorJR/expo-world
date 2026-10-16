@@ -24,12 +24,16 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.com.expoworld.core.Fix
+import br.com.expoworld.core.ActivityKind
+import br.com.expoworld.core.CityProgress
 import br.com.expoworld.core.ExplorationProgress
 import br.com.expoworld.core.TracePresentation
 import br.com.expoworld.location.*
 import br.com.expoworld.ui.WorldMap
 import br.com.expoworld.ui.ExplorationScreen
+import br.com.expoworld.ui.ExplorerAppearance
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import org.maplibre.android.MapLibre
 
 class MainActivity : ComponentActivity() {
@@ -46,7 +50,8 @@ class MainActivity : ComponentActivity() {
     private val preview = object : LocationListener {
         override fun onLocationChanged(location: Location) {
             if (!app.tracking.value.active && location.hasAccuracy() && location.accuracy <= 50 && SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos < 10_000_000_000L) {
-                app.tracking.update { it.copy(simulated = false, position = Fix(location.latitude, location.longitude, location.accuracy.toDouble(), location.elapsedRealtimeNanos / 1e9)) }
+                app.tracking.update { it.copy(simulated = false, position = Fix(location.latitude, location.longitude, location.accuracy.toDouble(), location.elapsedRealtimeNanos / 1e9,
+                    bearingDegrees = location.bearing.toDouble().takeIf { location.hasBearing() })) }
             }
         }
         override fun onProviderDisabled(provider: String) { if (!app.tracking.value.active) app.tracking.update { it.copy(message = "GPS desligado. Ative a localização do aparelho.") } }
@@ -82,7 +87,14 @@ class MainActivity : ComponentActivity() {
         worldMap.view.onCreate(savedInstanceState)
         worldMap.initialize()
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xFF70E1BA))) {
+            val theme by app.theme.collectAsStateWithLifecycle()
+            LaunchedEffect(theme) {
+                worldMap.setTheme(theme)
+                enableEdgeToEdge(
+                    statusBarStyle = if (theme.light) SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT) else SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+                    navigationBarStyle = if (theme.light) SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT) else SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
+            }
+            ExplorerAppearance(theme) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
@@ -107,7 +119,7 @@ class MainActivity : ComponentActivity() {
         pendingStart = false
         if (app.tracking.value.active) return
         if (!fineGranted()) { requestLocation(true); return }
-        runCatching { ContextCompat.startForegroundService(this, Intent(this, ExplorationService::class.java)) }
+        runCatching { ContextCompat.startForegroundService(this, Intent(this, ExplorationService::class.java).putExtra("activity", app.tracking.value.activity.key)) }
             .onFailure { app.tracking.update { it.copy(message = "Não foi possível iniciar. Mantenha o app aberto e confira as permissões.") } }
     }
     private fun stopTrip() {
@@ -132,20 +144,39 @@ class MainActivity : ComponentActivity() {
         val progressFlow = remember(viewMode) { app.repository.progress(viewMode) }
         val progressValue by progressFlow.collectAsStateWithLifecycle(ExplorationProgress(mode = viewMode))
         val progress = progressValue.takeIf { it.mode == viewMode } ?: ExplorationProgress(mode = viewMode)
+        val cityFlow = remember(viewMode) { app.city.progress(viewMode) }
+        val cityValue by cityFlow.collectAsStateWithLifecycle(CityProgress())
+        var currentNeighborhood by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(state.position, viewMode) {
+            currentNeighborhood = app.city.neighborhoodAt(state.position.takeIf { state.simulated == (viewMode == "simulation") })
+        }
+        val cityProgress = cityValue.copy(currentNeighborhoodId = currentNeighborhood)
         val online by connectivity.online.collectAsStateWithLifecycle()
         val isFollowing by following
         val traceFlow = remember(viewMode) { app.repository.route(viewMode) }
         val completedTrace by traceFlow.collectAsStateWithLifecycle(null)
         val route = completedTrace?.takeIf { it.mode == viewMode }
-        val displayedRoute = route?.takeIf { if (state.active) !it.completed else it.completed }?.let {
+        var selectedSavedId by rememberSaveable { mutableStateOf<String?>(null) }
+        val savedRoutesFlow = remember { app.repository.savedRoutes() }
+        val savedRoutes by savedRoutesFlow.collectAsStateWithLifecycle(emptyList())
+        val savedTraceFlow = remember(selectedSavedId) { app.repository.route(selectedSavedId ?: "no-selection") }
+        val savedTrace by savedTraceFlow.collectAsStateWithLifecycle(null)
+        val selectedTrace = savedTrace?.takeIf { it.mode == selectedSavedId && viewMode == "real" && !state.active }
+        val displayedRoute = selectedTrace ?: route?.takeIf { if (state.active) !it.completed else it.completed }?.let {
             if (state.active) it.copy(samples = TracePresentation.withLiveHead(it.samples, state.liveHead)) else it
         }
         var traceVisible by rememberSaveable { mutableStateOf(true) }
+        var saveBusy by remember { mutableStateOf(false) }
+        var saveMessage by remember { mutableStateOf("") }
+        val saveScope = rememberCoroutineScope()
+        LaunchedEffect(viewMode, state.active) { selectedSavedId = null; saveMessage = "" }
+        LaunchedEffect(selectedTrace) { selectedTrace?.let { traceVisible = true; worldMap.focusTrace(it) } }
         val mapStatus by mapMessage
         val currentDialog by dialog
         val permissionsRevision by permissionVersion
         val precise = remember(permissionsRevision) { fineGranted() }
         LaunchedEffect(viewMode, progress.cells) { worldMap.setMode(viewMode) }
+        LaunchedEffect(state.activity) { worldMap.setActivity(state.activity) }
         LaunchedEffect(state.position, viewMode) { worldMap.updatePosition(state.position.takeIf { state.simulated == (viewMode == "simulation") }) }
         LaunchedEffect(state.active, route?.startedAtMillis, route?.completed, viewMode) {
             if (!state.active && route?.completed == true) { traceVisible = true; worldMap.focusTrace(route) }
@@ -160,9 +191,15 @@ class MainActivity : ComponentActivity() {
         } else state.message
         ExplorationScreen(
             worldMap = worldMap,
+            onThemeChange = { app.selectTheme(it) },
             state = state,
             simulatedView = viewMode == "simulation",
             progress = progress,
+            cityProgress = cityProgress,
+            onActivityChange = { activity ->
+                if (!state.active) { selectedSavedId = null; app.tracking.update { it.copy(activity = activity) } }
+            },
+            onNeighborhoodFocus = { worldMap.focusNeighborhood(it) },
             online = online,
             following = isFollowing,
             onFollowingChange = { worldMap.setFollowing(it) },
@@ -172,10 +209,31 @@ class MainActivity : ComponentActivity() {
             trace = displayedRoute,
             traceVisible = traceVisible,
             onTraceVisibleChange = { traceVisible = it },
-            onTraceFocus = { route?.let { worldMap.focusTrace(it) } },
+            onTraceFocus = { displayedRoute?.let { worldMap.focusTrace(it) } },
+            savedRoutes = savedRoutes,
+            selectedSavedId = selectedSavedId,
+            onSavedRouteSelect = { selectedSavedId = it; if (it == null) route?.let { data -> worldMap.focusTrace(data) } },
+            canSave = !state.active && viewMode == "real" && selectedSavedId == null && route?.completed == true && route.samples.isNotEmpty(),
+            saveBusy = saveBusy,
+            saveMessage = saveMessage,
+            onSaveRoute = { title ->
+                val toSave = route
+                if (!state.active && viewMode == "real" && toSave?.completed == true && !saveBusy) {
+                    saveBusy = true
+                    saveScope.launch {
+                        try {
+                            app.repository.saveRealRoute(title, toSave.startedAtMillis)
+                            saveMessage = "Trajeto salvo: ${title.trim()}"
+                        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                        catch (e: Exception) { saveMessage = "Não foi possível salvar. Confira o espaço livre e tente novamente antes de iniciar outro percurso." }
+                        finally { saveBusy = false }
+                    }
+                }
+            },
             notificationsHidden = state.active && !state.simulated && Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED,
             onSimulationChange = { simulatedView = it },
             onTripToggle = {
+                selectedSavedId = null
                 if (state.active) stopTrip()
                 else if (viewMode == "simulation") simulation.start(lifecycleScope)
                 else prepareStart()

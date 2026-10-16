@@ -1,0 +1,24 @@
+# Base offline de Curitiba
+
+Preparada em 15/10/2026 para uso local, sem envio de posições GPS.
+
+- **Limites**: IBGE, Malha Censitária 2022, bairros do município 4106902, referência territorial 31/07/2022. O [diretório oficial de download](https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_de_setores_censitarios__divisoes_intramunicipais/censo_2022/bairros/shp/UF/) informa que os arquivos são públicos. Fonte atribuída na interface e neste repositório; não afirmamos uma licença Creative Commons específica não declarada para esse arquivo. A [descrição oficial do produto](https://www.ibge.gov.br/geociencias/organizacao-do-territorio/malhas-territoriais/26565-malhasde-setores-censitarios-divisoes-intramunicipais.html) explica a referência censitária. Os limites não são uma declaração de limites legais atuais; o [IPPUC](https://ippuc.org.br/geodownloads/geo.htm) também disponibiliza divisas municipais de setembro/2024, consultadas para referência, mas não incorporadas a este pacote.
+- **Vias**: © OpenStreetMap contributors, [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/); [atribuição e condições](https://www.openstreetmap.org/copyright). Extração única e limitada por `scripts/curitiba.overpass`, via `https://overpass-api.de/api/interpreter`. O timestamp exato da base consta em `totals.json` e no pacote. A API não é consultada pelo app.
+
+O pacote derivado de vias está disponível em `app/src/main/assets/curitiba-network.json` sob ODbL 1.0, em JSON UTF-8, comprimido pelo ZIP do APK (sem extensão `.gz`, que o AAPT remove ao empacotar). A malha de bairros atribuída ao IBGE está separada em `curitiba-neighborhoods.geojson`. O código do app e os trajetos pessoais não são publicados como parte da base de vias.
+
+## Reprodução
+
+Baixe `PR_bairros_CD2022.zip` do diretório oficial para `.tools/geodata/bairros.zip`. Execute a consulta Overpass uma única vez e salve a resposta JSON em `.tools/geodata/roads.json`. Instale `shapely` e `pyshp` em `.tools/geodata-libs` e execute `python scripts/prepare_curitiba.py`. Versões usadas: Shapely 2.2.0, pyshp 3.1.6. Nenhuma chave é necessária. O script valida a abrangência mínima e escreve o resumo reproduzível de quilômetros por bairro em `totals.json`.
+
+## Método e limites
+
+As vias são recortadas pelos polígonos; trechos exatamente na divisa recebem um único dono pela ordem dos códigos IBGE. Partes geométricas exatamente duplicadas são removidas. Vias com pistas fisicamente separadas podem contar cada eixo separadamente; não contamos faixas de rodagem. Calçadas e travessias explicitamente identificadas são excluídas para reduzir duplicação com o eixo da rua. Caminhos, ciclovias e escadas podem integrar apenas as modalidades compatíveis; acessos privados ou restritos explícitos, vias propostas e obras são excluídos. Ausência de uma restrição no OSM não garante acesso permitido ou seguro: isso não é um roteador.
+
+Comprimentos usam projeção local equiretangular, centrada em Curitiba (-25,48; -49,28), sem altitude, com resolução de centímetros no pacote. A variação de escala ao longo da cidade é pequena, mas não fizemos levantamento de campo nem aferição independente. Os números são **estimativas dos eixos elegíveis desta base**, sujeitos a vias ausentes, duplicadas, desatualizadas ou com classificação incorreta.
+
+O reconhecimento usa somente pares de posições aceitos pelo filtro, ambos com precisão até 12 m, intervalo até 12 s, deslocamento de 3 a 100 m e velocidade compatível com a atividade. A cada aproximadamente 3 m busca a via elegível mais próxima em até 12 m, verifica alinhamento e rejeita empate próximo (diferença menor que 3 m) entre vias. Credita partes de até 10 m quando sua região central é alcançada. A chave única impede contar repetições; o erro de quantização é da ordem de um trecho nas extremidades. Isso não equivale a map matching probabilístico: ruas paralelas, curvas entre leituras e sinal ruim podem causar omissões ou atribuições incorretas. Sem percentual de acurácia inventado.
+
+O namespace da versão impede misturar numeradores de uma base com denominadores de outra. Uma futura atualização da base precisa de remapeamento explícito; nesta versão ela é fixa. A exploração anterior continua preservada, mas não é convertida a ruas por aproximação da névoa de 50 m.
+
+O mapa e a cobertura por bairro são únicos entre carro, caminhada e bicicleta. O total compartilhado (`sharedKm` em `totals.json`) soma cada via elegível uma vez, independente da quantidade de modalidades permitidas: 6.331,757 km. A consulta de visitas reúne as atividades e deduplica por versão, rua e parte, sempre separando real e simulado. As restrições de cada modalidade continuam valendo ao reconhecer novos deslocamentos. Créditos existentes são reaproveitados sem alterar o banco ou a versão da geometria.

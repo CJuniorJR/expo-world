@@ -17,8 +17,8 @@ android {
         applicationId = "br.com.expoworld"
         minSdk = 23
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.2.0"
+        versionCode = 8
+        versionName = "0.3.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "MAPTILER_KEY", quoted(local.getProperty("MAPTILER_KEY", "")))
         buildConfigField("String", "MAP_STYLE_URL", quoted(local.getProperty("MAP_STYLE_URL", "")))
@@ -31,6 +31,7 @@ kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarg
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 dependencies {
     implementation(project(":core"))
+    implementation("org.locationtech.jts:jts-core:1.20.0")
     implementation(platform("androidx.compose:compose-bom:2025.08.01"))
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.compose.material3:material3")

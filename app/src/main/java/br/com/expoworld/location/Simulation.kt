@@ -13,16 +13,19 @@ class Simulation(private val app: WorldApp) {
     private var job: Job? = null
     fun start(scope: CoroutineScope) {
         if (app.tracking.value.active) return
+        val activity = app.tracking.value.activity
         app.tracking.update { it.copy(active = true, simulated = true, position = null, liveHead = null) }
         job = scope.launch {
-            val processor = ExplorationProcessor(app, "simulation")
+            val processor = ExplorationProcessor(app, "simulation", activity)
             try {
                 app.repository.clearSimulation()
                 processor.begin()
+                val origin = SystemClock.elapsedRealtimeNanos() / 1e9
                 for (i in 0..SimulatedRoute.LAST_INDEX) {
-                    val now = SystemClock.elapsedRealtimeNanos() / 1e9
-                    processor.ingest(SimulatedRoute.fix(i, now), now)
-                    delay(1000)
+                    val now = origin + i * activity.simulationTimeScale
+                    val fix = SimulatedRoute.fix(i, now)
+                    processor.ingest(fix.copy(speedMetersPerSecond = fix.speedMetersPerSecond?.div(activity.simulationTimeScale)), now)
+                    delay(SimulatedRoute.PLAYBACK_DELAY_MILLIS)
                 }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { app.tracking.update { it.copy(message = "Falha ao salvar simulação. Verifique o espaço livre.") } }

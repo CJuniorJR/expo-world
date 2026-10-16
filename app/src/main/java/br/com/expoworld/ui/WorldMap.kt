@@ -1,6 +1,8 @@
 package br.com.expoworld.ui
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Color as PixelColor
 import androidx.core.view.doOnLayout
 import br.com.expoworld.BuildConfig
 import br.com.expoworld.WorldApp
@@ -41,6 +43,10 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
     private var following = false
     private var loadFailure = false
     private var fogWarning = ""
+    private var selectedNeighborhoodId = ""
+    private var theme = app.theme.value
+    private var activity = ActivityKind.CAR
+    private fun activityIcon() = when (activity) { ActivityKind.CAR -> "palio-green"; ActivityKind.WALK -> "walker-green"; ActivityKind.BIKE -> "bike-green" }
     val configured = BuildConfig.MAP_STYLE_URL.isNotBlank() || BuildConfig.MAPTILER_KEY.isNotBlank()
     private val fallback = """{"version":8,"sources":{},"layers":[{"id":"background","type":"background","paint":{"background-color":"#bbc7c3"}}]}"""
 
@@ -51,7 +57,7 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
             applyInsets()
             loaded.setMinZoomPreference(8.0)
             loaded.setMaxZoomPreference(20.0)
-            loaded.cameraPosition = CameraPosition.Builder().target(LatLng(-23.5615, -46.6559)).zoom(15.0).build()
+            loaded.cameraPosition = CameraPosition.Builder().target(LatLng(-25.429, -49.273)).zoom(13.0).build()
             loaded.addOnCameraIdleListener { refreshFog() }
             loaded.addOnCameraMoveStartedListener { reason ->
                 if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) setFollowing(false)
@@ -101,16 +107,32 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
             style = s
             s.addSource(GeoJsonSource("fog", FogGeometry.geoJson(emptyList())))
             s.addLayer(FillLayer("fog-fill", "fog").withProperties(fillColor("#101820"), fillOpacity(.55f), fillAntialias(true)))
+            s.addSource(GeoJsonSource("neighborhoods", emptyFeatures))
+            s.addLayer(LineLayer("neighborhood-outlines", "neighborhoods").withProperties(lineColor(ExplorerTheme.hex(theme.accent)), lineWidth(1f), lineOpacity(.65f)))
+            s.addLayer(FillLayer("neighborhood-selected", "neighborhoods")
+                .withFilter(Expression.eq(Expression.get("id"), Expression.literal(selectedNeighborhoodId)))
+                .withProperties(fillColor(ExplorerTheme.hex(theme.accent)), fillOpacity(.15f)))
+            scope.launch {
+                try {
+                    val boundaries = withContext(Dispatchers.IO) { app.assets.open("curitiba-neighborhoods.geojson").bufferedReader().use { it.readText() } }
+                    if (style === s) s.getSourceAs<GeoJsonSource>("neighborhoods")?.setGeoJson(boundaries)
+                } catch (e: CancellationException) { throw e }
+                catch (_: Exception) { /* The repository reports catalog availability in the menu. */ }
+            }
             s.addSource(GeoJsonSource("speed-route", emptyFeatures))
-            s.addSource(GeoJsonSource("speed-stops", emptyFeatures))
-            s.addLayer(LineLayer("speed-route-outline", "speed-route").withProperties(lineColor("#102027"), lineWidth(10f),
+            s.addLayer(LineLayer("speed-route-outline", "speed-route").withProperties(lineColor(if (theme.light) "#354555" else "#102027"), lineWidth(10f),
                 lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
             s.addLayer(LineLayer("speed-route-color", "speed-route").withProperties(lineColor(Expression.get("color")), lineWidth(6f),
                 lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
-            s.addLayer(CircleLayer("speed-stop-dots", "speed-stops").withProperties(circleColor("#21404A"), circleRadius(9f),
-                circleStrokeColor("#C9FFF1"), circleStrokeWidth(2.5f)))
+            s.addImage("palio-green", palioPixelArt())
+            s.addImage("walker-green", activityPixelArt(ActivityKind.WALK))
+            s.addImage("bike-green", activityPixelArt(ActivityKind.BIKE))
             s.addSource(GeoJsonSource("position"))
-            s.addLayer(CircleLayer("position-dot", "position").withProperties(circleColor("#007DFF"), circleRadius(7f), circleStrokeColor("#FFFFFF"), circleStrokeWidth(3f)))
+            s.addLayer(SymbolLayer("position-palio", "position").withProperties(
+                iconImage(activityIcon()), iconSize(1.7f), iconAnchor(Property.ICON_ANCHOR_CENTER),
+                iconRotate(Expression.get("bearing")), iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+                iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_MAP), iconAllowOverlap(true), iconIgnorePlacement(true)
+            ))
             updatePosition(position)
             loadFailure = false
             publishMessage()
@@ -128,13 +150,51 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         refreshFog()
     }
     fun updatePosition(fix: Fix?) {
-        position = fix
-        if (fix == null) return
-        style?.getSourceAs<GeoJsonSource>("position")?.setGeoJson(Feature.fromGeometry(Point.fromLngLat(fix.longitude, fix.latitude)))
+        if (fix == null) { position = null; return }
+        val previous = position
+        val bearing = fix.bearingDegrees?.takeIf { it.isFinite() } ?: previous
+            ?.takeIf { Geo.distance(it, fix) > 1.5 && fix.monotonicSeconds > it.monotonicSeconds }
+            ?.let { Geo.bearing(it, fix) } ?: previous?.bearingDegrees ?: 0.0
+        val orientedFix = fix.copy(bearingDegrees = bearing)
+        position = orientedFix
+        val feature = Feature.fromGeometry(Point.fromLngLat(orientedFix.longitude, orientedFix.latitude)).apply {
+            addNumberProperty("bearing", bearing)
+        }
+        style?.getSourceAs<GeoJsonSource>("position")?.setGeoJson(feature)
         if (!centered && map != null) { center(); centered = true }
-        else if (following) map?.easeCamera(CameraUpdateFactory.newLatLng(LatLng(fix.latitude, fix.longitude)), 700)
+        else if (following) map?.easeCamera(CameraUpdateFactory.newLatLng(LatLng(orientedFix.latitude, orientedFix.longitude)), if (mode == "simulation") 100 else 700)
     }
     fun center() { position?.let { map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), 16.0)) } }
+    fun setTheme(value: ExplorerTheme) {
+        theme = value
+        style?.let { s ->
+            s.addImage("palio-green", palioPixelArt())
+            s.addImage("walker-green", activityPixelArt(ActivityKind.WALK))
+            s.addImage("bike-green", activityPixelArt(ActivityKind.BIKE))
+            s.getLayerAs<LineLayer>("neighborhood-outlines")?.setProperties(lineColor(ExplorerTheme.hex(value.accent)))
+            s.getLayerAs<FillLayer>("neighborhood-selected")?.setProperties(fillColor(ExplorerTheme.hex(value.accent)))
+            s.getLayerAs<LineLayer>("speed-route-outline")?.setProperties(lineColor(if (value.light) "#354555" else "#102027"))
+        }
+        renderTrace()
+    }
+    fun setActivity(value: ActivityKind) {
+        activity = value
+        style?.getLayerAs<SymbolLayer>("position-palio")?.setProperties(iconImage(activityIcon()))
+    }
+    fun focusNeighborhood(id: String) {
+        scope.launch {
+            try {
+                val area = app.city.bounds(id) ?: return@launch
+                selectedNeighborhoodId = id
+                style?.getLayerAs<FillLayer>("neighborhood-selected")?.setFilter(
+                    Expression.eq(Expression.get("id"), Expression.literal(id)))
+                setFollowing(false)
+                val bounds = LatLngBounds.Builder().includes(listOf(LatLng(area[0], area[1]), LatLng(area[2], area[3]))).build()
+                map?.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, (density * 40).toInt()))
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { message("Não foi possível enquadrar o bairro. Confira a base de Curitiba no menu.") }
+        }
+    }
     fun setTrace(value: RecordedTrace?) {
         trace = value
         if (value == null) focusPending = null
@@ -146,17 +206,16 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         val data = trace
         if (data == null) {
             s.getSourceAs<GeoJsonSource>("speed-route")?.setGeoJson(emptyFeatures)
-            s.getSourceAs<GeoJsonSource>("speed-stops")?.setGeoJson(emptyFeatures)
             return
         }
+        val palette = theme
         traceJob = scope.launch {
             val json = withContext(Dispatchers.Default) {
-                TracePresentation.lineGeoJson(data.samples) to TracePresentation.stopGeoJson(data.samples)
+                TracePresentation.lineGeoJson(data.samples, data.activity, palette)
             }
             ensureActive()
             if (style === s && trace === data) {
-                s.getSourceAs<GeoJsonSource>("speed-route")?.setGeoJson(json.first)
-                s.getSourceAs<GeoJsonSource>("speed-stops")?.setGeoJson(json.second)
+                s.getSourceAs<GeoJsonSource>("speed-route")?.setGeoJson(json)
             }
         }
     }
@@ -194,7 +253,7 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         val request = ++generation
         fogJob?.cancel()
         fogJob = scope.launch {
-            delay(250) // Coalesce location and camera changes; cancellation rejects stale results.
+            delay(if (selectedMode == "simulation") 50 else 250) // Keep up with accelerated playback.
             try {
                 val cells = withContext(Dispatchers.IO) {
                     // The SDK can return unwrapped longitudes such as 179..181.
@@ -219,4 +278,71 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         }
     }
     fun dispose() { fogJob?.cancel(); traceJob?.cancel() }
+
+    private fun activityPixelArt(kind: ActivityKind): Bitmap {
+        val rows = if (kind == ActivityKind.WALK) listOf(
+            "......DDDD......", ".....DSSSSD.....", ".....DSSSSD.....", "......DDDD......",
+            "....DDGGGGDD....", "...DGGGGGGGGD...", "..DGGGGGGGGGGD..", "..DGGGGGGGGGGD..",
+            "..DGGGGGGGGGGD..", "...DGGGGGGGGD...", "....DGGGGGGD....", "....DDDDDDDD....",
+            "....DD....DD....", "....DD....DD....", "...DDD....DDD..."
+        ) else listOf(
+            ".......DD.......", ".......DD.......", ".......DD.......", "...SSSSSSSSSS...",
+            ".......DD.......", ".......GG.......", "......GGGG......", "......GDDG......",
+            "......GDDG......", "......GGGG......", ".......GG.......", "......DDDD......",
+            "......DDDD......", ".......DD.......", ".......DD.......", ".......DD.......", ".......DD......."
+        )
+        val bitmap = Bitmap.createBitmap(16, rows.size, Bitmap.Config.ARGB_8888)
+        rows.forEachIndexed { y, row -> row.forEachIndexed { x, pixel -> bitmap.setPixel(x, y, when (pixel) {
+            'D' -> PixelColor.rgb(23, 35, 34); 'G' -> (0xFF000000.toInt() or if (theme == ExplorerTheme.GREEN) 0x21B38B else theme.carHighlight)
+            'S' -> PixelColor.rgb(214, 217, 185); else -> PixelColor.TRANSPARENT
+        }) } }
+        return bitmap
+    }
+
+    /** Tiny overhead pixel drawing of a Brazilian Palio, facing north. */
+    private fun palioPixelArt(): Bitmap {
+        val rows = listOf(
+            "........DDDD........",
+            "......DDDDDDDD......",
+            ".....DDGGGGGGDD.....",
+            "....DGGGYYYYGGGD....",
+            "...DGGGGGGGGGGGGD...",
+            "..DDGGGGGGGGGGGGDD..",
+            ".DDGGGGGGGGGGGGGGDD.",
+            "DDGGGGGGGGGGGGGGGGDD",
+            "DDTTGGGGGGGGGGGGTTDD",
+            "..TTDGGGGGGGGGGDTT..",
+            "....DGGGGGGGGGGD....",
+            "....DWWWWWWWWWWD....",
+            "....DWWWWKKWWWWD....",
+            "....DWWWWKKWWWWD....",
+            "....DWWWWWWWWWWD....",
+            "....DGGGGGGGGGGD....",
+            ".....GGGGgGGGG.....",
+            ".DD.DGGGGGGGGGGD.DD.",
+            "DDGGDGGGGGGGGGGDGGDD",
+            "DDGGDGGGGGGGGGGDGGDD",
+            ".DD.DGGGGGGGGGGD.DD.",
+            "....DGGGGGGGGGGD....",
+            "....DGGGGGGGGGGD....",
+            "....DTTTTTTTTTTD....",
+            "....DTTTTTTTTTTD....",
+            "...DDTTTTTTTTTTDD...",
+            "..DDDDDDSSSSDDDDDD..",
+            "..DDD......DDD..."
+        )
+        val width = rows.maxOf { it.length }
+        val bitmap = Bitmap.createBitmap(width, rows.size, Bitmap.Config.ARGB_8888)
+        val colors = mapOf(
+            'D' to PixelColor.rgb(29, 39, 38), 'G' to (0xFF000000.toInt() or theme.carBody),
+            'g' to (0xFF000000.toInt() or theme.carHighlight), 'Y' to PixelColor.rgb(246, 177, 48),
+            'W' to PixelColor.rgb(122, 192, 199), 'K' to PixelColor.rgb(40, 81, 84),
+            'T' to PixelColor.rgb(19, 28, 28), 'S' to PixelColor.rgb(161, 180, 172)
+        )
+        rows.forEachIndexed { y, row ->
+            val left = (width - row.length) / 2
+            row.forEachIndexed { x, pixel -> bitmap.setPixel(left + x, y, colors[pixel] ?: PixelColor.TRANSPARENT) }
+        }
+        return bitmap
+    }
 }
