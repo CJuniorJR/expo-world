@@ -17,11 +17,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 @Entity(tableName = "cells", primaryKeys = ["mode", "y", "x"])
-data class ExploredCell(val mode: String, val y: Int, val x: Int)
+data class ExploredCell(val mode: String, val y: Int, val x: Int,
+    @ColumnInfo(defaultValue = "NULL") val firstDiscoveredAtMillis: Long? = null)
+
+@Entity(tableName = "trip_cells", primaryKeys = ["mode", "y", "x"])
+data class TripCell(val mode: String, val y: Int, val x: Int,
+    @ColumnInfo(defaultValue = "-1") val elapsedSeconds: Double = -1.0)
+
+data class CoverageBounds(val minX: Int?, val maxX: Int?, val minY: Int?, val maxY: Int?) {
+    fun domain(): CellBounds? = minX?.let { CellBounds(it, maxX!!, minY!!, maxY!!) }
+}
 
 @Entity(tableName = "route_sessions")
 data class RouteSession(@PrimaryKey val mode: String, val startedAtMillis: Long, val endedAtMillis: Long?, val completed: Boolean,
-    @ColumnInfo(defaultValue = "'car'") val activity: String = "car")
+    @ColumnInfo(defaultValue = "'car'") val activity: String = "car",
+    @ColumnInfo(defaultValue = "NULL") val newAreaSquareMeters: Double? = null)
 
 @Entity(tableName = "route_samples", primaryKeys = ["mode", "sequence"])
 data class RouteSampleRow(
@@ -52,6 +62,12 @@ private fun TraceSample.toRow(mode: String) = RouteSampleRow(mode, sequence, lat
 
 @Dao
 interface ExplorationDao {
+    @Query("SELECT * FROM cells WHERE mode = 'real' AND (y > :afterY OR (y = :afterY AND x > :afterX)) ORDER BY y, x LIMIT 1024")
+    suspend fun exportPage(afterY: Int, afterX: Int): List<ExploredCell>
+    @Query("SELECT MIN(x) AS minX, MAX(x) AS maxX, MIN(y) AS minY, MAX(y) AS maxY FROM cells WHERE mode = :mode")
+    suspend fun extent(mode: String): CoverageBounds
+    @Query("SELECT MIN(x) AS minX, MAX(x) AS maxX, MIN(y) AS minY, MAX(y) AS maxY FROM cells WHERE mode = :mode AND y BETWEEN :minY AND :maxY AND x BETWEEN :minX AND :maxX GROUP BY (x - CASE WHEN x < 0 THEN :stride - 1 ELSE 0 END) / :stride, (y - CASE WHEN y < 0 THEN :stride - 1 ELSE 0 END) / :stride LIMIT 4001")
+    suspend fun coverage(mode: String, minX: Int, maxX: Int, minY: Int, maxY: Int, stride: Int): List<CoverageBounds>
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertStreetVisits(visits: List<StreetVisit>)
     @Query("SELECT neighborhoodId, SUM(meters) AS meters FROM (SELECT neighborhoodId, streetId, bin, MAX(meters) AS meters FROM street_visits WHERE mode = :mode AND dataset = :dataset GROUP BY neighborhoodId, streetId, bin) GROUP BY neighborhoodId")
@@ -74,10 +90,21 @@ interface ExplorationDao {
         val id = "saved:" + java.util.UUID.randomUUID().toString()
         putSession(session.copy(mode = id))
         points.forEach { putSample(it.copy(mode = id)) }
+        insertTrip(allTrip("real").map { it.copy(mode = id) })
         insertSavedRoute(SavedRoute(id, title.trim(), session.startedAtMillis, session.activity))
     }
     @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insert(cells: List<ExploredCell>)
+    suspend fun insertTrip(cells: List<TripCell>)
+    @Query("SELECT * FROM trip_cells WHERE mode = :mode")
+    suspend fun allTrip(mode: String): List<TripCell>
+    @Query("DELETE FROM trip_cells WHERE mode = :mode")
+    suspend fun clearTrip(mode: String)
+    @Query("SELECT * FROM trip_cells WHERE mode = :mode AND y BETWEEN :minY AND :maxY AND x BETWEEN :minX AND :maxX LIMIT 60001")
+    suspend fun discoveries(mode: String, minX: Int, maxX: Int, minY: Int, maxY: Int): List<TripCell>
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insert(cells: List<ExploredCell>): List<Long>
+    @Query("UPDATE route_sessions SET newAreaSquareMeters = newAreaSquareMeters + :area WHERE mode = :mode")
+    suspend fun addNewArea(mode: String, area: Double)
     @Query("SELECT * FROM cells WHERE mode = :mode AND y BETWEEN :minY AND :maxY AND x BETWEEN :minX AND :maxX LIMIT :limit")
     suspend fun visible(mode: String, minX: Int, maxX: Int, minY: Int, maxY: Int, limit: Int): List<ExploredCell>
     @Query("SELECT COUNT(*) FROM cells WHERE mode = :mode")
@@ -108,13 +135,21 @@ interface ExplorationDao {
     @Transaction
     suspend fun beginRoute(mode: String, startedAt: Long, activity: String = "car") {
         deleteSamples(mode)
-        putSession(RouteSession(mode, startedAt, null, false, activity))
+        clearTrip(mode)
+        putSession(RouteSession(mode, startedAt, null, false, activity, 0.0))
     }
     @Transaction
-    suspend fun saveAccepted(cells: List<ExploredCell>, sample: RouteSampleRow?, startedAt: Long?, activity: String = "car", visits: List<StreetVisit> = emptyList()) {
+    suspend fun saveAccepted(cells: List<ExploredCell>, sample: RouteSampleRow?, startedAt: Long?, activity: String = "car", visits: List<StreetVisit> = emptyList(), elapsed: Double = -1.0) {
         if (sample != null && startedAt != null) beginRoute(sample.mode, startedAt, activity)
-        insert(cells)
         if (visits.isNotEmpty()) insertStreetVisits(visits)
+        val inserted = insert(cells)
+        val fresh = cells.filterIndexed { index, _ -> inserted[index] != -1L }
+        if (fresh.isNotEmpty()) {
+            insertTrip(fresh.map { TripCell(it.mode, it.y, it.x, elapsed) })
+            val area = br.com.expoworld.core.ExplorationProgress.fromRows(
+                fresh.groupingBy { it.y }.eachCount().map { it.key to it.value.toLong() }).areaSquareMeters
+            addNewArea(fresh.first().mode, area)
+        }
         if (sample != null) {
             putSample(sample)
             trimSamples(sample.mode, sample.sequence - TraceConfig.MAX_SAMPLES + 1)
@@ -127,27 +162,14 @@ interface ExplorationDao {
     }
     @Transaction
     suspend fun resetSimulation() {
-        clearSimulation(); deleteSamples("simulation"); deleteSimulationSession(); clearSimulatedVisits()
+        clearSimulation(); clearTrip("simulation"); deleteSamples("simulation"); deleteSimulationSession(); clearSimulatedVisits()
     }
 }
 
-@Database(entities = [ExploredCell::class, RouteSession::class, RouteSampleRow::class, SavedRoute::class, StreetVisit::class], version = 5, exportSchema = true)
+@Database(entities = [ExploredCell::class, TripCell::class, RouteSession::class, RouteSampleRow::class, SavedRoute::class, StreetVisit::class], version = 7, exportSchema = true)
 abstract class ExplorationDatabase : RoomDatabase() { abstract fun cells(): ExplorationDao }
 
-val MIGRATION_4_5 = object : Migration(4, 5) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE route_sessions ADD COLUMN activity TEXT NOT NULL DEFAULT 'car'")
-        db.execSQL("ALTER TABLE saved_routes ADD COLUMN activity TEXT NOT NULL DEFAULT 'car'")
-        db.execSQL("CREATE TABLE IF NOT EXISTS street_visits (mode TEXT NOT NULL, activity TEXT NOT NULL, dataset TEXT NOT NULL, streetId TEXT NOT NULL, bin INTEGER NOT NULL, neighborhoodId TEXT NOT NULL, meters REAL NOT NULL, PRIMARY KEY(mode, activity, dataset, streetId, bin))")
-        db.execSQL("CREATE INDEX IF NOT EXISTS index_street_visits_mode_activity_dataset_neighborhoodId ON street_visits(mode, activity, dataset, neighborhoodId)")
-    }
-}
 
-val MIGRATION_3_4 = object : Migration(3, 4) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("CREATE TABLE IF NOT EXISTS saved_routes (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, startedAtMillis INTEGER NOT NULL)")
-    }
-}
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
     override fun migrate(db: SupportSQLiteDatabase) {
@@ -165,23 +187,48 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
+
+
+
 class ExplorationRepository(private val dao: ExplorationDao) {
     fun savedRoutes() = dao.savedRoutes()
     suspend fun saveRealRoute(title: String, expectedStart: Long) = dao.saveRealRoute(title, expectedStart)
+    suspend fun visualCells(mode: String, bounds: CellBounds): List<br.com.expoworld.core.CellDiscovery> {
+        val rows = dao.visible(mode, bounds.minX, bounds.maxX, bounds.minY, bounds.maxY, ExplorationConfig.MAX_VIEW_CELLS + 1)
+        check(rows.size <= ExplorationConfig.MAX_VIEW_CELLS) { "Aproxime o mapa para mostrar a exploração desta região." }
+        return rows.map { br.com.expoworld.core.CellDiscovery(Cell(it.x, it.y), it.firstDiscoveredAtMillis) }
+    }
+    suspend fun timeline(mode: String, bounds: CellBounds): List<br.com.expoworld.core.TripDiscovery> =
+        dao.discoveries(mode, bounds.minX, bounds.maxX, bounds.minY, bounds.maxY).map {
+            br.com.expoworld.core.TripDiscovery(Cell(it.x, it.y), it.elapsedSeconds)
+        }
+    suspend fun extent(mode: String) = dao.extent(mode).domain()
+    suspend fun coverage(mode: String, bounds: CellBounds): List<CellBounds> {
+        var stride = 8
+        while (true) {
+            val rows = dao.coverage(mode, bounds.minX, bounds.maxX, bounds.minY, bounds.maxY, stride)
+            if (rows.size <= 4000) return rows.mapNotNull { it.domain() }
+            stride *= 2
+        }
+    }
+    suspend fun discoveries(mode: String, bounds: CellBounds): List<Cell> {
+        val cells = dao.discoveries(mode, bounds.minX, bounds.maxX, bounds.minY, bounds.maxY)
+        return if (cells.size > ExplorationConfig.MAX_VIEW_CELLS) emptyList() else cells.map { Cell(it.x, it.y) }
+    }
     suspend fun save(mode: String, cells: Set<Cell>) {
         // One Room transaction per accepted fix; committed before UI revision changes.
         dao.insert(cells.map { ExploredCell(mode, it.y, it.x) })
     }
     suspend fun saveAccepted(mode: String, cells: Set<Cell>, sample: TraceSample?, startedAt: Long? = null,
-        activity: String = "car", visits: List<StreetVisit> = emptyList()) = dao.saveAccepted(
-        cells.map { ExploredCell(mode, it.y, it.x) }, sample?.toRow(mode), startedAt, activity, visits
+        activity: String = "car", visits: List<StreetVisit> = emptyList(),
+        elapsed: Double = sample?.elapsedSeconds ?: -1.0, discoveredAt: Long = System.currentTimeMillis()) = dao.saveAccepted(
+        cells.map { ExploredCell(mode, it.y, it.x, discoveredAt) }, sample?.toRow(mode), startedAt, activity, visits, elapsed
     )
     suspend fun beginRoute(mode: String) = dao.beginRoute(mode, System.currentTimeMillis())
     suspend fun finishRoute(mode: String, last: TraceSample?) = dao.finishRoute(mode, System.currentTimeMillis(), last?.toRow(mode))
     fun route(mode: String): Flow<RecordedTrace?> = dao.routeSnapshot(mode).map { snapshot ->
         snapshot?.let { RecordedTrace(it.session.startedAtMillis, it.session.endedAtMillis ?: it.session.startedAtMillis,
-            it.samples.sortedBy { row -> row.sequence }.map { row -> row.toDomain() }, mode, it.session.completed,
-            br.com.expoworld.core.ActivityKind.fromKey(it.session.activity)) }
+            it.samples.sortedBy { row -> row.sequence }.map { row -> row.toDomain() }, mode, it.session.completed, it.session.newAreaSquareMeters, br.com.expoworld.core.ActivityKind.fromKey(it.session.activity)) }
     }.flowOn(Dispatchers.Default)
     fun completedRoute(mode: String): Flow<RecordedTrace?> = route(mode).map { it?.takeIf { data -> data.completed } }
     fun progress(mode: String): Flow<br.com.expoworld.core.ExplorationProgress> = dao.progressRows(mode).map { rows ->

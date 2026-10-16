@@ -32,6 +32,23 @@ import br.com.expoworld.core.ActivityKind
 import br.com.expoworld.core.CityProgress
 import br.com.expoworld.core.ExplorerTheme
 import br.com.expoworld.storage.SavedRoute
+import br.com.expoworld.core.GpsSignal
+import br.com.expoworld.core.GpsQuality
+import br.com.expoworld.core.SimulationScenario
+import br.com.expoworld.core.MapPresentation
+import br.com.expoworld.core.ArtCommand
+import br.com.expoworld.core.ExpeditionArt
+import br.com.expoworld.core.DiscoveryEpoch
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.foundation.horizontalScroll
+import kotlinx.coroutines.delay
 import java.text.NumberFormat
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -62,6 +79,23 @@ fun ExplorationScreen(
     status: String,
     mapStatus: String,
     precise: Boolean,
+    gpsSignal: GpsSignal,
+    fogOpacity: Float,
+    onFogOpacityChange: (Float) -> Unit,
+    highlight: Boolean,
+    onHighlightChange: (Boolean) -> Unit,
+    onOverview: () -> Unit,
+    onPauseToggle: () -> Unit,
+    scenario: SimulationScenario,
+    onScenarioChange: (SimulationScenario) -> Unit,
+    storageBusy: Boolean,
+    storageMessage: String,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+    cardTitle: String,
+    onCardTitleChange: (String) -> Unit,
+    onCardExport: () -> Unit,
+    onAnimationExport: () -> Unit,
     trace: RecordedTrace?,
     traceVisible: Boolean,
     onTraceVisibleChange: (Boolean) -> Unit,
@@ -94,15 +128,78 @@ fun ExplorationScreen(
         }) { Text("Salvar") } },
         dismissButton = { TextButton(onClick = { titleDialog = false }) { Text("Cancelar") } }
     )
+    var presentationIndex by rememberSaveable { mutableIntStateOf(0) }
+    val presentation = MapPresentation.entries[presentationIndex]
+    var comparison by rememberSaveable { mutableFloatStateOf(.5f) }
+    var replayFraction by rememberSaveable { mutableFloatStateOf(0f) }
+    var playing by remember { mutableStateOf(false) }
+    var cardOpen by rememberSaveable { mutableStateOf(false) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) playing = false }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(state.active, simulatedView) {
+        presentationIndex = 0; playing = false; cardOpen = false
+    }
+    LaunchedEffect(presentation, comparison, replayFraction, trace) {
+        worldMap.setPresentation(presentation, if (presentation == MapPresentation.COMPARE) comparison else replayFraction)
+    }
+    LaunchedEffect(playing, presentation) {
+        if (playing && presentation == MapPresentation.REPLAY) {
+            val first = replayFraction
+            val started = android.os.SystemClock.elapsedRealtime()
+            while (replayFraction < 1f) {
+                delay(200)
+                replayFraction = (first + (android.os.SystemClock.elapsedRealtime() - started) / 12_000f).coerceAtMost(1f)
+            }
+            playing = false
+        }
+    }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val palette = LocalExplorerTheme.current
+    var cardMap by remember { mutableStateOf<br.com.expoworld.storage.ExpeditionMapImage?>(null) }
+    var cardMapError by remember { mutableStateOf("") }
+    LaunchedEffect(cardOpen, trace) {
+        cardMap = null; cardMapError = ""
+        if (cardOpen && trace != null) {
+            try { cardMap = br.com.expoworld.storage.ExpeditionMapLoader.load(context, trace) }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (_: Exception) { cardMapError = "Não foi possível carregar o mapa. Confira a internet e tente abrir o cartão novamente." }
+        }
+    }
+    DisposableEffect(cardMap) {
+        val image = cardMap
+        onDispose { image?.bitmap?.recycle() }
+    }
+    var art by remember { mutableStateOf<List<ArtCommand>>(emptyList()) }
+    LaunchedEffect(cardOpen, trace, cardTitle, cardMap, palette) {
+        if (cardOpen && trace != null) art = withContext(Dispatchers.Default) {
+            val date = java.text.SimpleDateFormat("dd.MM.yyyy", Locale.forLanguageTag("pt-BR")).format(java.util.Date(trace.startedAtMillis))
+            ExpeditionArt.scene(trace, cardTitle, date, theme = palette, mapPoint = cardMap?.point)
+        }
+    }
+    var summaryOpen by rememberSaveable { mutableStateOf(false) }
+    var pendingSummaryStart by rememberSaveable { mutableStateOf<Long?>(null) }
+    LaunchedEffect(state.active, trace?.startedAtMillis, trace?.completed) {
+        if (state.active && trace != null && !trace.completed) pendingSummaryStart = trace.startedAtMillis
+        if (!state.active && trace?.completed == true && pendingSummaryStart == trace.startedAtMillis) {
+            pendingSummaryStart = null; summaryOpen = true; menuOpen = false; onHighlightChange(true)
+        }
+    }
+    LaunchedEffect(highlight) { if (highlight) { delay(120_000); onHighlightChange(false) } }
     var summary by remember { mutableStateOf<TripSummary?>(null) }
-    LaunchedEffect(trace) { summary = trace?.let { data -> withContext(Dispatchers.Default) { TripSummary.from(data) } } }
+    LaunchedEffect(trace) { summary = null; summary = trace?.let { data -> withContext(Dispatchers.Default) { TripSummary.from(data) } } }
     val density = LocalDensity.current
     val topInset = WindowInsets.safeDrawing.getTop(density)
     val bottomInset = WindowInsets.safeDrawing.getBottom(density)
-    LaunchedEffect(topInset, bottomInset) { worldMap.setInsets(topInset, bottomInset) }
+    LaunchedEffect(topInset, bottomInset, presentation) { worldMap.setInsets(topInset, bottomInset + if (presentation != MapPresentation.NORMAL) (density.density * 120).toInt() else 0) }
     val activeGps = state.active && !state.simulated
     val waitingGps = activeGps && !state.message.startsWith("Explorando")
     val statusLabel = when {
+        storageBusy -> "Processando backup…"
+        state.active && state.paused -> if (simulatedView) "MODO SIMULADO • pausado" else "Percurso pausado"
         simulatedView -> "MODO SIMULADO"
         waitingGps -> when {
             state.message.startsWith("Movimento incompatível") -> "Confira a atividade escolhida"
@@ -111,8 +208,10 @@ fun ExplorationScreen(
         }
         activeGps && !online -> "GPS ativo • sem internet"
         activeGps -> "Explorando"
+        mapStatus.startsWith("Visão geral") -> "Visão geral • aproxime para detalhes"
         mapStatus.startsWith("Aproxime") -> "Aproxime para ver a exploração"
         mapStatus.isNotEmpty() -> "Confira o mapa"
+        trace?.isInterrupted(state.active) == true -> "Percurso interrompido • recuperado"
         trace != null && trace.samples.isNotEmpty() -> "Percurso concluído"
         !online -> "Sem internet"
         else -> "Pronto para explorar"
@@ -129,6 +228,9 @@ fun ExplorationScreen(
     Box(Modifier.fillMaxSize()) {
         // The map owns the entire window. All controls float over it.
         AndroidView(factory = { worldMap.view }, modifier = Modifier.fillMaxSize())
+        if (presentation == MapPresentation.COMPARE) Canvas(Modifier.fillMaxSize()) {
+            drawLine(Color(0xFFFFD166), Offset(size.width * comparison, 0f), Offset(size.width * comparison, size.height), 3.dp.toPx())
+        }
         Box(Modifier.fillMaxWidth().height(160.dp).align(Alignment.TopCenter)
             .background(Brush.verticalGradient(listOf(Ink.copy(alpha = .65f), Color.Transparent))))
         Box(Modifier.fillMaxWidth().height(180.dp).align(Alignment.BottomCenter)
@@ -158,17 +260,48 @@ fun ExplorationScreen(
 
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (presentation != MapPresentation.NORMAL) Surface(color = Ink.copy(alpha = .97f), shape = RoundedCornerShape(20.dp)) {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(when (presentation) {
+                                MapPresentation.COMPARE -> "ANTES  ←  |  →  DEPOIS"
+                                MapPresentation.REPLAY -> "REPLAY • ${(replayFraction * 100).toInt()}%"
+                                else -> "SUAS PRIMEIRAS VEZES"
+                            }, color = Mint, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            TextButton(onClick = { playing = false; presentationIndex = 0 }) { Text("Sair") }
+                        }
+                        when (presentation) {
+                            MapPresentation.COMPARE -> Slider(value = comparison, onValueChange = { comparison = it })
+                            MapPresentation.REPLAY -> {
+                                Slider(value = replayFraction, onValueChange = { playing = false; replayFraction = it })
+                                TextButton(onClick = { if (replayFraction >= 1f) replayFraction = 0f; playing = !playing }) {
+                                    Text(if (playing) "Pausar replay" else "Reproduzir")
+                                }
+                            }
+                            MapPresentation.EPOCHS -> DiscoveryEpoch.entries.forEach { epoch ->
+                                Text("● ${epoch.label}", color = Color(android.graphics.Color.parseColor(epoch.color)), fontSize = 11.sp)
+                            }
+                            else -> Unit
+                        }
+                        if (presentation != MapPresentation.EPOCHS) Text("Aproxime para comparar ou animar a névoa no detalhe.", color = Muted, fontSize = 10.sp)
+                    }
+                }
                 Surface(onClick = { menuOpen = true }, color = Ink.copy(alpha = .94f), contentColor = statusColor,
                     shape = CircleShape) {
                     Row(Modifier.padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Box(Modifier.size(7.dp).background(statusColor, CircleShape))
-                        Text(statusLabel, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        Column {
+                            Text(statusLabel, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            if (!simulatedView && precise && !state.paused) Text(gpsSignal.label +
+                                (gpsSignal.accuracyMeters?.let { " • ~${it.toInt()} m" } ?: ""),
+                                color = if (gpsSignal.quality == GpsQuality.GOOD) Mint else Color(0xFFFFD589), fontSize = 10.sp)
+                        }
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    Button(onClick = onTripToggle, colors = actionColors, shape = RoundedCornerShape(20.dp),
+                    Button(onClick = onTripToggle, enabled = !storageBusy, colors = actionColors, shape = RoundedCornerShape(20.dp),
                         modifier = Modifier.weight(1f).heightIn(min = 56.dp), contentPadding = PaddingValues(14.dp)) {
                         Icon(painterResource(if (state.active) R.drawable.ic_stop else R.drawable.ic_explore), null,
                             modifier = Modifier.size(20.dp))
@@ -234,8 +367,24 @@ fun ExplorationScreen(
                 InfoCard(areaLabel(progress.areaSquareMeters), "área descoberta • estimativa", Modifier.weight(1f))
                 InfoCard("50 m", "de cada lado do trajeto", Modifier.weight(1f))
             }
+            if (state.active) OutlinedButton(onClick = onPauseToggle, modifier = Modifier.fillMaxWidth()) {
+                Text(if (state.paused) "Continuar este percurso" else "Pausar este percurso")
+            }
             Text("Suas descobertas ficam salvas neste aparelho e se acumulam entre viagens.", color = Muted,
                 style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = { onOverview(); menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
+                Text("Ver todas as descobertas")
+            }
+            Text("Intensidade da névoa • ${(fogOpacity * 100).toInt()}%", style = MaterialTheme.typography.titleMedium)
+            Slider(value = fogOpacity, onValueChange = onFogOpacityChange, valueRange = .2f.. .8f)
+            if (!state.active && trace != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween) {
+                Column(Modifier.weight(1f)) {
+                    Text("Destacar áreas novas", style = MaterialTheme.typography.bodyMedium)
+                    Text("Dourado • último percurso • por 2 minutos", color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(checked = highlight, onCheckedChange = onHighlightChange)
+            }
             Surface(shape = RoundedCornerShape(20.dp), color = Tint, contentColor = Paper) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("✦  ${progress.title}", color = Mint, style = MaterialTheme.typography.titleMedium)
@@ -250,6 +399,12 @@ fun ExplorationScreen(
             Text("Rastro por velocidade", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             trace?.let { Text("Percurso: ${it.activity.label}", color = Muted, style = MaterialTheme.typography.bodySmall) }
             savedRoutes.firstOrNull { it.id == selectedSavedId }?.let { Text(it.title, color = Mint) }
+            if (trace?.isInterrupted(state.active) == true) Text(
+                "Recuperamos o trecho salvo antes da interrupção. A gravação está encerrada; iniciar outra viagem substitui este rastro ao receber o primeiro ponto válido.",
+                color = Color(0xFFFFD589), style = MaterialTheme.typography.bodySmall)
+            if (trace != null) InfoCard(trace.newAreaSquareMeters?.let { areaLabel(it) } ?: "—",
+                if (trace.newAreaSquareMeters == null) "área nova indisponível neste percurso antigo" else "área nova neste percurso • estimativa",
+                Modifier.fillMaxWidth())
             when {
                 trace == null || trace.samples.isEmpty() -> Text(if (state.active) "Aguardando a primeira posição precisa para desenhar o rastro ao vivo."
                     else "Inicie um percurso para ver o rastro ao vivo e consulte o resumo ao encerrar.", color = Muted,
@@ -273,7 +428,7 @@ fun ExplorationScreen(
                             else currentSummary.averageKmh?.let { String.format(Locale.forLanguageTag("pt-BR"), "%.0f km/h", it) } ?: "—",
                             if (trace.activity == ActivityKind.WALK) "ritmo médio • min/km" else "velocidade média • GPS", Modifier.weight(1f))
                     }
-                    if (currentSummary.missingGpsSeconds >= 1) Text("${durationLabel(currentSummary.missingGpsSeconds)} sem continuidade de sinal; lacunas não entram na distância.",
+                    if (currentSummary.missingGpsSeconds >= 1) Text("${durationLabel(currentSummary.missingGpsSeconds)} sem registro (sinal ou pausa); lacunas não entram na distância.",
                         color = Muted, style = MaterialTheme.typography.bodySmall)
                     if (currentSummary.partial) Text("Resumo parcial: o percurso ultrapassou o limite de amostras e mostra a parte mais recente.",
                         color = Muted, style = MaterialTheme.typography.bodySmall)
@@ -319,6 +474,39 @@ fun ExplorationScreen(
                     }
                 }
             }
+            HorizontalDivider(color = Track)
+            Text("Rever e guardar", style = MaterialTheme.typography.titleMedium)
+            Text("Replay e comparação não alteram suas descobertas. Datas antigas ficam desconhecidas. Viagens antigas podem ter apenas replay da linha, sem a ordem de revelação. Sem áreas novas registradas, antes e depois ficam iguais. Pausas e falhas de sinal são respeitadas.", color = Muted,
+                style = MaterialTheme.typography.bodySmall)
+            if (!state.active) {
+                OutlinedButton(onClick = { presentationIndex = MapPresentation.EPOCHS.ordinal; playing = false; menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Mapa das primeiras vezes")
+                }
+                if (trace != null && trace.samples.isNotEmpty()) {
+                    OutlinedButton(onClick = { onTraceVisibleChange(true); onTraceFocus(); comparison = .5f; presentationIndex = MapPresentation.COMPARE.ordinal; playing = false; menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Comparar antes e depois")
+                    }
+                    OutlinedButton(onClick = { onTraceVisibleChange(true); replayFraction = 0f; presentationIndex = MapPresentation.REPLAY.ordinal; playing = true; menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Replay do último percurso")
+                    }
+                    Button(onClick = { playing = false; cardOpen = true; menuOpen = false }, enabled = !storageBusy, modifier = Modifier.fillMaxWidth()) {
+                        Text("Criar cartão e exportar animação")
+                    }
+                }
+            } else Text("Encerre a viagem para rever e exportar.", color = Muted)
+            if (trace != null && !state.active) OutlinedButton(onClick = { summaryOpen = true; menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
+                Text("Abrir resumo do percurso")
+            }
+            HorizontalDivider(color = Track)
+            Text("Backup das descobertas", style = MaterialTheme.typography.titleMedium)
+            Text("Exporta a exploração real, sem o último rastro nem a simulação. Restaurar mescla as descobertas sem apagar as atuais. O arquivo contém lugares que você visitou; escolha onde guardá-lo.",
+                color = Muted, style = MaterialTheme.typography.bodySmall)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onExport, enabled = !state.active && !storageBusy, modifier = Modifier.weight(1f)) { Text("Exportar") }
+                OutlinedButton(onClick = onImport, enabled = !state.active && !storageBusy, modifier = Modifier.weight(1f)) { Text("Restaurar") }
+            }
+            if (state.active) Text("Encerre o percurso para usar o backup.", color = Muted, style = MaterialTheme.typography.bodySmall)
+            if (storageMessage.isNotEmpty()) Text(storageMessage, color = Mint, style = MaterialTheme.typography.bodySmall)
 
             if (mapStatus.isNotEmpty()) {
                 Text("Mapa", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -329,6 +517,13 @@ fun ExplorationScreen(
             }
             HorizontalDivider(color = Track)
             Text("Localização", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            if (!simulatedView && state.paused) Text("Gravação pausada; as atualizações GPS do percurso estão suspensas.", color = Mint)
+            if (!simulatedView && !state.paused) {
+                Text(gpsSignal.label + (gpsSignal.accuracyMeters?.let { " • precisão estimada de ${it.toInt()} m" } ?: ""),
+                    color = if (gpsSignal.quality == GpsQuality.GOOD) Mint else Color(0xFFFFD589))
+                Text("O círculo azul representa a incerteza informada pelo GPS, não a área revelada. Leituras acima de 20 m não revelam o mapa.",
+                    color = Muted, style = MaterialTheme.typography.bodySmall)
+            }
             Text(if (precise) "Localização precisa autorizada" else "Autorize a localização precisa para revelar o caminho", color = Muted,
                 style = MaterialTheme.typography.bodySmall)
             if (state.active) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
@@ -357,12 +552,59 @@ fun ExplorationScreen(
                 }
                 if (state.active) Text("Encerre a exploração para trocar de modo.", color = Muted,
                     style = MaterialTheme.typography.bodySmall)
+                if (simulatedView) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SimulationScenario.entries.forEach { option ->
+                        FilterChip(selected = scenario == option, enabled = !state.active && !storageBusy,
+                            onClick = { onScenarioChange(option) }, label = { Text(option.label) })
+                    }
+                }
             }
-            Button(onClick = { onTripToggle(); menuOpen = false }, colors = actionColors, shape = RoundedCornerShape(18.dp),
+            Button(onClick = { onTripToggle(); menuOpen = false }, enabled = !storageBusy, colors = actionColors, shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) { Text(actionLabel, fontWeight = FontWeight.SemiBold) }
             Text("Prepare seu percurso antes de sair. Durante a atividade, o app funciona de forma passiva.", color = Muted,
                 style = MaterialTheme.typography.bodySmall)
             Text("Expo World  ${BuildConfig.VERSION_NAME}", color = Muted.copy(alpha = .7f), style = MaterialTheme.typography.labelSmall)
+        }
+    }
+    if (summaryOpen && trace != null) AlertDialog(
+        onDismissRequest = { summaryOpen = false },
+        title = { Text(if (trace.completed) "Seu percurso" else "Percurso recuperado") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(if (simulatedView) "MODO SIMULADO" else "Descobertas salvas neste aparelho", color = Mint)
+                Text("Área nova: ${trace.newAreaSquareMeters?.let { areaLabel(it) } ?: "indisponível neste percurso antigo"}", fontWeight = FontWeight.Bold)
+                summary?.let { data ->
+                    Text("Distância: ${distanceLabel(data.distanceMeters)}")
+                    Text("Tempo entre registros: ${durationLabel(data.recordedSeconds)}")
+                    Text("Parado: ${durationLabel(data.stoppedSeconds)} • ${data.stops} paradas")
+                    Text(if (data.missingGpsSeconds >= 1) "Registro com trechos separados: ${durationLabel(data.missingGpsSeconds)} sem registro por pausa ou sinal."
+                        else "Registro sem lacunas entre as amostras salvas.")
+                    if (data.partial) Text("Rastro parcial: somente as amostras mais recentes. A área nova considera toda a viagem.")
+                } ?: Text("Calculando resumo…")
+                if (!trace.completed) Text("Trecho recuperado após interrupção; últimas leituras em memória podem estar ausentes.")
+                Text("Estimativas de GPS. As áreas novas podem ser destacadas em dourado no mapa.", color = Muted)
+            }
+        },
+        confirmButton = { TextButton(onClick = { summaryOpen = false; onTraceFocus(); onHighlightChange(true) }) { Text("Ver no mapa") } },
+        dismissButton = { TextButton(onClick = { summaryOpen = false }) { Text("Fechar") } }
+    )
+    if (cardOpen && trace != null) Dialog(onDismissRequest = { cardOpen = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxWidth().fillMaxHeight(.94f).padding(12.dp), shape = RoundedCornerShape(24.dp), color = Ink, contentColor = Paper) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Seu cartão de expedição", style = MaterialTheme.typography.titleLarge)
+                OutlinedTextField(value = cardTitle, onValueChange = onCardTitleChange, singleLine = true, label = { Text("Título (até 40 caracteres)") }, modifier = Modifier.fillMaxWidth())
+                if (cardMap == null) Text(cardMapError.ifBlank { "Carregando mapa do percurso…" }, color = Muted)
+                else Canvas(Modifier.fillMaxWidth().aspectRatio(ExpeditionArt.WIDTH.toFloat() / ExpeditionArt.HEIGHT)) {
+                    ExpeditionRenderer.draw(drawContext.canvas.nativeCanvas, art, size.width, size.height, map = cardMap?.bitmap)
+                }
+                Text("PNG e GIF incluem o mapa e o percurso, com as cores do seu tema. Internet é necessária para carregar o mapa. Os arquivos são salvos onde você escolher.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onCardExport, enabled = !storageBusy && cardMap != null, modifier = Modifier.weight(1f)) { Text("Salvar PNG") }
+                    OutlinedButton(onClick = onAnimationExport, enabled = !storageBusy && cardMap != null, modifier = Modifier.weight(1f)) { Text("Salvar GIF") }
+                }
+                if (storageMessage.isNotEmpty()) Text(storageMessage, color = Mint)
+                TextButton(onClick = { cardOpen = false }, modifier = Modifier.fillMaxWidth()) { Text("Fechar") }
+            }
         }
     }
 }

@@ -28,12 +28,19 @@ import br.com.expoworld.core.ActivityKind
 import br.com.expoworld.core.CityProgress
 import br.com.expoworld.core.ExplorationProgress
 import br.com.expoworld.core.TracePresentation
+import br.com.expoworld.core.GpsSignal
+import br.com.expoworld.core.GpsQuality
+import br.com.expoworld.core.SimulationScenario
+import br.com.expoworld.storage.BackupManager
+import br.com.expoworld.storage.ExpeditionExporter
 import br.com.expoworld.location.*
 import br.com.expoworld.ui.WorldMap
 import br.com.expoworld.ui.ExplorationScreen
 import br.com.expoworld.ui.ExplorerAppearance
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import org.maplibre.android.MapLibre
 
 class MainActivity : ComponentActivity() {
@@ -46,9 +53,40 @@ class MainActivity : ComponentActivity() {
     private val dialog = mutableStateOf("")
     private val permissionVersion = mutableIntStateOf(0)
     private var pendingStart = false
+    private val storageBusy = mutableStateOf(false)
+    private val storageMessage = mutableStateOf("")
+    private fun exportMedia(uri: android.net.Uri, animated: Boolean) {
+        val prefs = getSharedPreferences("map", MODE_PRIVATE)
+        val mode = prefs.getString("exportMode", "real") ?: "real"
+        val title = prefs.getString("cardTitle", "Minha expedição") ?: "Minha expedição"
+        runBackup {
+            ExpeditionExporter(app).export(uri, mode, title, animated)
+            if (animated) "Replay salvo como GIF animado." else "Cartão salvo como imagem PNG."
+        }
+    }
+    private val exportCard = registerForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri -> uri?.let { exportMedia(it, false) } }
+    private val exportAnimation = registerForActivityResult(ActivityResultContracts.CreateDocument("image/gif")) { uri -> uri?.let { exportMedia(it, true) } }
+    private val exportBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        uri?.let { runBackup { "Backup salvo: ${BackupManager(app).export(it)} células reais. Guarde o arquivo para restaurar em outro aparelho." } }
+    }
+    private val importBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { runBackup { "Restauração concluída: ${BackupManager(app).restore(it)} células novas adicionadas. Seus dados anteriores foram preservados." } }
+    }
+    private fun runBackup(action: suspend () -> String) {
+        if (app.tracking.value.active || app.storageBusy) { storageMessage.value = "Encerre a viagem antes de usar o backup."; return }
+        app.storageBusy = true; storageBusy.value = true; storageMessage.value = "Processando arquivo…"
+        lifecycleScope.launch {
+            try { storageMessage.value = action(); worldMap.refreshFog() }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { storageMessage.value = if (e is br.com.expoworld.storage.MapExportUnavailable) e.message.orEmpty() else "Não foi possível concluir a operação. Confira o arquivo e o espaço livre. A exploração salva foi preservada." }
+            finally { app.storageBusy = false; storageBusy.value = false }
+        }
+    }
     private val manager get() = getSystemService(LocationManager::class.java)
     private val preview = object : LocationListener {
         override fun onLocationChanged(location: Location) {
+            if (!app.tracking.value.active) app.tracking.update { it.copy(gpsFix = Fix(location.latitude, location.longitude,
+                if (location.hasAccuracy()) location.accuracy.toDouble() else Double.POSITIVE_INFINITY, location.elapsedRealtimeNanos / 1e9)) }
             if (!app.tracking.value.active && location.hasAccuracy() && location.accuracy <= 50 && SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos < 10_000_000_000L) {
                 app.tracking.update { it.copy(simulated = false, position = Fix(location.latitude, location.longitude, location.accuracy.toDouble(), location.elapsedRealtimeNanos / 1e9,
                     bearingDegrees = location.bearing.toDouble().takeIf { location.hasBearing() })) }
@@ -115,6 +153,7 @@ class MainActivity : ComponentActivity() {
         else startReal()
     }
     private fun startReal() {
+        if (app.storageBusy) return
         if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) { pendingStart = true; return }
         pendingStart = false
         if (app.tracking.value.active) return
@@ -127,7 +166,7 @@ class MainActivity : ComponentActivity() {
         else startService(Intent(this, ExplorationService::class.java).setAction(ExplorationService.STOP))
     }
     private fun startPreview() {
-        if (!fineGranted() || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
+        if (app.tracking.value.active || !fineGranted() || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
         try {
             manager.removeUpdates(preview)
             manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2000L, 5f, preview, Looper.getMainLooper())
@@ -139,7 +178,15 @@ class MainActivity : ComponentActivity() {
     }
     @Composable private fun Screen() {
         val state by app.tracking.collectAsStateWithLifecycle()
+        val now by produceState(SystemClock.elapsedRealtimeNanos() / 1e9) {
+            while (true) { value = SystemClock.elapsedRealtimeNanos() / 1e9; delay(2000) }
+        }
         var simulatedView by rememberSaveable { mutableStateOf(false) }
+        var scenarioIndex by rememberSaveable { mutableIntStateOf(0) }
+        var highlight by rememberSaveable { mutableStateOf(false) }
+        val preferences = remember { getSharedPreferences("map", MODE_PRIVATE) }
+        var cardTitle by rememberSaveable { mutableStateOf(preferences.getString("cardTitle", "Minha expedição") ?: "Minha expedição") }
+        var fogOpacity by remember { mutableFloatStateOf(preferences.getFloat("fogOpacity", .55f).coerceIn(.2f, .8f)) }
         val viewMode = if (state.active) { if (state.simulated) "simulation" else "real" } else if (simulatedView) "simulation" else "real"
         val progressFlow = remember(viewMode) { app.repository.progress(viewMode) }
         val progressValue by progressFlow.collectAsStateWithLifecycle(ExplorationProgress(mode = viewMode))
@@ -162,33 +209,46 @@ class MainActivity : ComponentActivity() {
         val savedTraceFlow = remember(selectedSavedId) { app.repository.route(selectedSavedId ?: "no-selection") }
         val savedTrace by savedTraceFlow.collectAsStateWithLifecycle(null)
         val selectedTrace = savedTrace?.takeIf { it.mode == selectedSavedId && viewMode == "real" && !state.active }
-        val displayedRoute = selectedTrace ?: route?.takeIf { if (state.active) !it.completed else it.completed }?.let {
-            if (state.active) it.copy(samples = TracePresentation.withLiveHead(it.samples, state.liveHead)) else it
-        }
+        val displayedRoute = selectedTrace ?: route?.takeIf { !state.active || !it.completed }
         var traceVisible by rememberSaveable { mutableStateOf(true) }
         var saveBusy by remember { mutableStateOf(false) }
         var saveMessage by remember { mutableStateOf("") }
         val saveScope = rememberCoroutineScope()
         LaunchedEffect(viewMode, state.active) { selectedSavedId = null; saveMessage = "" }
         LaunchedEffect(selectedTrace) { selectedTrace?.let { traceVisible = true; worldMap.focusTrace(it) } }
+        var focusAfterTrip by rememberSaveable { mutableStateOf<Long?>(null) }
         val mapStatus by mapMessage
         val currentDialog by dialog
         val permissionsRevision by permissionVersion
         val precise = remember(permissionsRevision) { fineGranted() }
+        LaunchedEffect(state.active) {
+            if (state.active) { manager.removeUpdates(preview); highlight = false } else startPreview()
+        }
+        LaunchedEffect(highlight, state.active, viewMode) { worldMap.setDiscoveries(highlight && !state.active) }
+        LaunchedEffect(fogOpacity) { worldMap.setFogOpacity(fogOpacity) }
         LaunchedEffect(viewMode, progress.cells) { worldMap.setMode(viewMode) }
         LaunchedEffect(state.activity) { worldMap.setActivity(state.activity) }
         LaunchedEffect(state.position, viewMode) { worldMap.updatePosition(state.position.takeIf { state.simulated == (viewMode == "simulation") }) }
         LaunchedEffect(state.active, route?.startedAtMillis, route?.completed, viewMode) {
-            if (!state.active && route?.completed == true) { traceVisible = true; worldMap.focusTrace(route) }
+            if (state.active && route != null && !route.completed) focusAfterTrip = route.startedAtMillis
+            if (!state.active && route?.completed == true && route.startedAtMillis == focusAfterTrip) {
+                traceVisible = true; worldMap.focusTrace(route); focusAfterTrip = null
+            }
             if (state.active) worldMap.setFollowing(true) else worldMap.setFollowing(false)
         }
-        LaunchedEffect(displayedRoute, traceVisible, state.active) { worldMap.setTrace(displayedRoute.takeIf { traceVisible || state.active }) }
+        LaunchedEffect(displayedRoute, state.liveHead, traceVisible, state.active) {
+            worldMap.setTrace(displayedRoute.takeIf { traceVisible || state.active }, state.liveHead.takeIf { state.active })
+        }
         var wasOnline by remember { mutableStateOf(online) }
         LaunchedEffect(online) { if (!wasOnline && online) worldMap.retryIfNeeded(); wasOnline = online }
         val status = if (!state.active && state.simulated != (viewMode == "simulation")) {
             if (viewMode == "simulation") "Modo simulado. Inicie o trajeto de desenvolvimento para testar a revelação."
             else "Exploração real. Suas áreas estão salvas; inicie uma viagem para revelar novos lugares."
         } else state.message
+        val gpsSignal = GpsSignal.from(state.gpsFix.takeIf { precise && viewMode == "real" }, now)
+        LaunchedEffect(state.gpsFix, gpsSignal, viewMode) {
+            worldMap.updateAccuracy(state.gpsFix.takeIf { gpsSignal.quality != GpsQuality.LOST && viewMode == "real" })
+        }
         ExplorationScreen(
             worldMap = worldMap,
             onThemeChange = { app.selectTheme(it) },
@@ -206,6 +266,26 @@ class MainActivity : ComponentActivity() {
             status = status,
             mapStatus = mapStatus,
             precise = precise,
+            gpsSignal = gpsSignal,
+            fogOpacity = fogOpacity,
+            onFogOpacityChange = { fogOpacity = it; preferences.edit().putFloat("fogOpacity", it).apply() },
+            highlight = highlight,
+            onHighlightChange = { highlight = it },
+            onOverview = { worldMap.overview() },
+            onPauseToggle = {
+                if (state.simulated) simulation.togglePause()
+                else startService(Intent(this, ExplorationService::class.java).setAction(if (state.paused) ExplorationService.RESUME else ExplorationService.PAUSE))
+            },
+            scenario = SimulationScenario.entries[scenarioIndex],
+            onScenarioChange = { scenarioIndex = it.ordinal },
+            storageBusy = storageBusy.value,
+            storageMessage = storageMessage.value,
+            onExport = { exportBackup.launch("expo-world-${java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date())}.expoworld") },
+            onImport = { importBackup.launch(arrayOf("application/octet-stream", "text/plain", "*/*")) },
+            cardTitle = cardTitle,
+            onCardTitleChange = { cardTitle = it.take(40); preferences.edit().putString("cardTitle", cardTitle).apply() },
+            onCardExport = { preferences.edit().putString("exportMode", selectedSavedId ?: viewMode).apply(); exportCard.launch("expo-world-cartao.png") },
+            onAnimationExport = { preferences.edit().putString("exportMode", selectedSavedId ?: viewMode).apply(); exportAnimation.launch("expo-world-replay.gif") },
             trace = displayedRoute,
             traceVisible = traceVisible,
             onTraceVisibleChange = { traceVisible = it },
@@ -234,8 +314,9 @@ class MainActivity : ComponentActivity() {
             onSimulationChange = { simulatedView = it },
             onTripToggle = {
                 selectedSavedId = null
-                if (state.active) stopTrip()
-                else if (viewMode == "simulation") simulation.start(lifecycleScope)
+                if (app.storageBusy) Unit
+                else if (state.active) stopTrip()
+                else if (viewMode == "simulation") simulation.start(lifecycleScope, SimulationScenario.entries[scenarioIndex])
                 else prepareStart()
             },
             onCenter = { if (!precise && viewMode == "real") requestLocation(false) else {

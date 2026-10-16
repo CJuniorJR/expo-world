@@ -8,6 +8,8 @@ package br.com.expoworld.core
  * Virtual seconds remain physical seconds for filtering and speed analysis.
  */
 object SimulatedRoute {
+    const val DEFAULT_LATITUDE = -25.429
+    const val DEFAULT_LONGITUDE = -49.273
     const val PLAYBACK_DELAY_MILLIS = 125L // Accelerated playback; clock adjusted for the activity.
     private val streets = listOf(
         Fix(-25.430008, -49.269203, 5.0, 0.0),

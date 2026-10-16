@@ -11,8 +11,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 data class TrackingState(
     val active: Boolean = false,
+    val paused: Boolean = false,
     val simulated: Boolean = false,
     val position: Fix? = null,
+    val gpsFix: Fix? = null,
     val liveHead: TraceSample? = null,
     val activity: ActivityKind = ActivityKind.CAR,
     val message: String = "Solicite localização para ver sua posição. A exploração começa ao iniciar uma viagem.",
@@ -20,6 +22,7 @@ data class TrackingState(
 )
 
 class WorldApp : Application() {
+    var storageBusy = false
     val tracking = MutableStateFlow(TrackingState())
     private val appearance by lazy { getSharedPreferences("appearance", MODE_PRIVATE) }
     val theme by lazy { MutableStateFlow(ExplorerTheme.fromKey(appearance.getString("theme", null))) }
@@ -27,7 +30,7 @@ class WorldApp : Application() {
         appearance.edit().putString("theme", value.key).apply()
         theme.value = value
     }
-    val database by lazy { Room.databaseBuilder(this, ExplorationDatabase::class.java, "exploration.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build() }
+    val database by lazy { Room.databaseBuilder(this, ExplorationDatabase::class.java, "exploration.db").addMigrations(*ALL_MIGRATIONS).build() }
     val repository by lazy { ExplorationRepository(database.cells()) }
     val city by lazy { CuritibaRepository(database.cells(), assets) }
 }

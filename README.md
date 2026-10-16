@@ -2,6 +2,10 @@
 
 Aplicativo nativo em Kotlin/Jetpack Compose que revela uma faixa ao redor do caminho percorrido. MapLibre Native exibe o mapa; Room preserva a exploração e o rastro por velocidade do último percurso. Interface em português do Brasil. Sem login, backend, sincronização, anúncios ou navegação. Trajetos reais podem ser salvos localmente com título e consultados depois.
 
+## Versão unificada 0.5.1 — 16/10/2026
+
+Integra as branches de bairros/temas e replay/exportação na `main`. Preserva backup, visão geral, pausa, primeiras descobertas, comparação, replay, trajetos com título, modalidades e temas. Retorna o percentual por bairro ao menu, remove a camada de bolinhas de parada e inclui o mapa-base na prévia, PNG e GIF. O banco 7 normaliza as estruturas divergentes das versões 4/5 e preserva os dados das duas linhas de desenvolvimento. Nesta entrega o usuário autorizou explicitamente integração direta na `main`, sem novo PR.
+
 ## Abrir e configurar
 
 1. Abra esta pasta no Android Studio. Selecione **JDK 17** para o Gradle (Settings → Build, Execution, Deployment → Build Tools → Gradle). Não use Java 8.
@@ -18,13 +22,13 @@ Sem chave/URL de estilo, há um fundo neutro com orientação clara. Ele permite
 python scripts/check_migration_sql.py
 ```
 
-O APK, quando compilado, fica em `app/build/outputs/apk/debug/app-debug.apk`. A entrega atual também está em `dist/expo-world-0.3.2-debug.apk`. O teste conectado exige um Android conectado por ADB ou emulador iniciado. A verificação Python usa a biblioteca padrão para testar o SQL das migrações em SQLite do computador, sem substituir o teste Room no Android. Relatórios: `core/build/reports/tests/test/index.html` e `app/build/reports/lint-results-debug.html`.
+O APK, quando compilado, fica em `app/build/outputs/apk/debug/app-debug.apk`. A entrega atual também está em `dist/expo-world-0.5.1-debug.apk`. O teste conectado exige um Android conectado por ADB ou emulador iniciado. A verificação Python usa a biblioteca padrão para testar o SQL das migrações em SQLite do computador, sem substituir o teste Room no Android. Relatórios: `core/build/reports/tests/test/index.html` e `app/build/reports/lint-results-debug.html`.
 
 `scripts/bootstrap-build.ps1` pode baixar JDK 17 em `.tools` e executar a compilação, sem alterar a instalação de Java do sistema. `-InstallAndroidSdk` também instala ferramentas Android locais e apresenta as licenças do SDK para revisão/aceitação. O script precisa de acesso à internet; downloads e caches não são versionados. Se já tiver SDK instalado, defina `ANDROID_HOME` ou `sdk.dir`. A primeira execução baixa o Gradle e as dependências.
 
 ## Uso em aparelho
 
-Na versão 0.2.0 o mapa ocupa a tela inteira, com controles flutuantes e névoa mais suave. O botão de menu (três linhas, no alto à direita) abre um painel com progresso, resumo do percurso, estado do GPS, rastro por velocidade, permissões e modo simulado. Toque fora do painel, deslize-o para baixo ou use o botão de fechar para voltar ao mapa. O botão com uma mira centraliza sua posição; iniciar/encerrar continua acessível sobre o mapa. A atribuição permanece visível com o menu fechado.
+Na versão 0.5.1 o mapa ocupa a tela inteira, com controles flutuantes e névoa mais suave. O botão de menu (três linhas, no alto à direita) abre um painel com progresso, resumo do percurso, estado do GPS, rastro por velocidade, permissões e modo simulado. Toque fora do painel, deslize-o para baixo ou use o botão de fechar para voltar ao mapa. O botão com uma mira centraliza sua posição; iniciar/encerrar continua acessível sobre o mapa. A atribuição permanece visível com o menu fechado.
 
 Ao iniciar, o mapa acompanha a posição com transições de câmera. Mover ou girar o mapa com os dedos pausa esse acompanhamento; a mira retoma-o. O menu oferece **Acompanhar minha posição**. Isso só movimenta a câmera: não fornece navegação nem instruções de direção.
 
@@ -73,6 +77,79 @@ O painel mostra uma estimativa da **área descoberta** em m²/km², calculada a 
 
 O resumo do rastro mostra distância registrada, tempo entre registros, duração aproximada parado e ritmo médio GPS. A distância ignora lacunas e deriva entre leituras do mesmo grupo de parada. A média usa as velocidades conhecidas ponderadas pelo tempo; velocidade desconhecida não vira zero. A aquisição inicial do GPS não faz parte do tempo entre registros. Se o limite de amostras foi ultrapassado, o resumo é marcado como parcial. São estimativas para explorar o mapa, não um odômetro ou medição precisa de trânsito.
 
+## Novidades da versão 0.5.0
+
+O mapa começa no centro de **Curitiba** (-25.4284, -49.2733). A primeira localização real válida ainda pode centralizar no aparelho. Um rastro antigo não muda automaticamente a cidade ao abrir; use Enquadrar percurso para vê-lo. O enquadramento automático permanece ao encerrar uma nova viagem.
+
+### Replay do último percurso
+
+Depois de encerrar, abra Menu → Rever e guardar → Replay do último percurso. Há reprodução/pausa, busca pela barra e Sair. O replay comprime o período registrado em cerca de 12 segundos, mantém as cores de velocidade e um marcador dourado. Não interpola entre segmentos separados por falta de GPS, pausa ou antimeridiano. Ao sair do primeiro plano, a reprodução pausa. Não inicia serviço, não solicita GPS adicional e não grava exploração.
+
+Em viagens iniciadas nesta versão, cada célula nova guarda seu tempo relativo no percurso. No detalhe, a névoa reaparece e se abre na ordem das descobertas. A animação usa um snapshot do viewport e trabalho fora da interface, com no máximo 20 mil células para animar a névoa; em áreas maiores ou viagens sem tempos conhecidos, o replay da linha continua, com a névoa final. Em zoom menor que 12, continua a cobertura aproximada da visão geral. Aproximar permite consultar o detalhe. Rastros limitados a 20 mil amostras têm replay parcial, começando no primeiro ponto retido.
+
+### Antes e depois
+
+Menu → Comparar antes e depois. A barra move uma divisória vertical: à esquerda a névoa cobre novamente as áreas novas da última viagem; à direita aparece o estado atual. Mover/rotacionar o mapa atualiza o recorte geográfico. Os modos replay, comparação e épocas são exclusivos, e começar uma viagem sai deles.
+
+A comparação usa a diferença das células novas do último percurso, disponível a partir da 0.4.0. Ela não altera o banco. Viagens sem áreas novas/sem identificação das células podem mostrar os lados iguais. Não é um histórico de snapshots globais: importações de backup posteriores à viagem aparecem nos dois lados. A comparação detalhada requer zoom/quantidade de células dentro do limite da névoa; junto ao antimeridiano, o recorte pode ser omitido para evitar polígonos inválidos.
+
+### Cartão e animação para salvar
+
+Menu → Criar cartão e exportar animação. Escolha um título de até 40 caracteres e confira a prévia. **Salvar PNG** cria um cartão de 1080×1440, com percurso, data, distância, área nova, tempo e paradas. Percursos simulados, interrompidos ou parciais são identificados. **Salvar GIF** cria uma animação ilustrada do trajeto em 360×480, 40 quadros e paleta de 256 cores, com cerca de 11 segundos por ciclo.
+
+PNG e GIF incluem o mapa-base renderizado pelo MapLibre com o mesmo estilo configurado no aplicativo, além do rastro e da atribuição MapTiler/OpenStreetMap. O enquadramento considera o percurso inteiro, e a projeção do rastro usa o snapshot para manter alinhamento com as ruas. A prévia do cartão usa a mesma imagem e projeção; não é uma captura da tela atual nem inclui seus controles. Internet é necessária para carregar os dados cartográficos ainda não disponíveis. Falha ou tempo limite de 45 segundos mostra orientação para tentar novamente; não é gerado silenciosamente um cartão sem mapa. Os temas são preservados no rastro; paradas são segmentos pretos sem marcadores de parada. Os círculos de início e fim/posição do replay continuam identificando as extremidades.
+
+O seletor Android escolhe o destino, sem nova permissão de armazenamento ou upload automático. Os arquivos contêm o percurso sobre o mapa. A imagem de fundo é renderizada uma vez e reutilizada nos 40 quadros; codificação e buffers ficam fora da interface, com cancelamento e arquivos temporários removidos. A exportação não inclui a animação da névoa: ela continua disponível no replay dentro do mapa. Durante a exportação, iniciar outra viagem fica bloqueado. As prévias JVM em `core/build/preview` verificam layout e desenho vetorial, sem acesso ao mapa real.
+
+### Mapa das primeiras vezes
+
+Menu → Mapa das primeiras vezes. No detalhe, dourado indica as células novas do último percurso; verde, as primeiras descobertas do mês atual; azul, descobertas anteriores ao mês; cinza, data desconhecida. O último percurso tem prioridade de cor. O mês usa o calendário/fuso do aparelho. Datas futuras ou ausentes são tratadas como desconhecidas na visualização. Repassar por um lugar não muda sua primeira data.
+
+O banco unificado **7** recebe migrações das versões 1 a 6. As branches anteriores tinham estruturas diferentes para os mesmos números 4 e 5; a migração verifica as colunas existentes antes de acrescentar o que falta, preservando células, rastros, títulos e créditos. Datas/tempos antigos continuam desconhecidos. Não se inventa quando uma área antiga foi visitada. O backup agora usa formato **2**, com a primeira data por célula; a restauração também aceita formato 1, cujas datas ficam desconhecidas. Duplicatas preservam a data já existente. Limites de 128 MB e 5 milhões de células valem simultaneamente na exportação e restauração. O backup continua sem rastro, tempo relativo do último percurso ou preferências.
+
+### Simulação com curvas em Curitiba
+
+A versão unificada conserva o percurso OSRM/OpenStreetMap de aproximadamente 3,3 km documentado abaixo, com reprodução rápida e velocidades adequadas a carro, caminhada e bicicleta. Os cenários de túnel, oscilação, salto e recuperação de sinal usam a mesma geometria, assim como pausa/continuação. Cada teste limpa somente os dados simulados; a exploração real permanece intacta. A geração é local e não consulta internet. Dados © OpenStreetMap contributors, ODbL. O percurso é uma ferramenta de teste, sem orientação de trânsito. GIF89a segue a [especificação publicada](https://www.w3.org/Graphics/GIF/spec-gif89a.txt).
+
+### Conferência rápida
+
+1. Instale como atualização; confira Curitiba na abertura sem um GPS válido centralizando outra região.
+2. Rode uma **nova** simulação normal e encerre: confira curvas, resumo e destaque. Antes/depois deve esconder/repor as áreas novas sem alterar o total explorado.
+3. Reproduza e arraste a barra do replay. Repita com Túnel sem sinal ou Pausa: não deve surgir uma linha ligando as lacunas.
+4. Abra o mapa das primeiras vezes: as áreas da viagem nova ficam douradas; áreas antigas sem data continuam desconhecidas. Real e simulação não se misturam.
+5. Edite o título do cartão, salve PNG/GIF e abra os arquivos num visualizador. Confira acentos, SIMULADO, atribuição, animação e identificação de rastro parcial/interrompido.
+6. Exporte/restaure backup novo e antigo: não inventar datas antigas nem alterar a primeira data ao repetir a importação. Cancelar o seletor não deve alterar exploração.
+
+## Recursos da versão 0.4.0
+
+O menu reúne as novas funções, mantendo o mapa em tela inteira:
+
+- **Backup e restauração:** Exportar cria um arquivo `.expoworld` com as células da exploração real. Restaurar valida versão, coordenadas, contagem e checksum SHA-256 antes de mesclar o arquivo numa transação; duplicatas não aumentam a área e nada é apagado. Não inclui rastro, créditos de ruas por bairro, simulação ou preferências. Usa o seletor [Storage Access Framework do Android](https://developer.android.com/training/data-storage/shared/documents-files), sem permissões amplas de armazenamento. Os arquivos são legíveis, sem criptografia, e contêm lugares visitados; o destino é escolhido pelo usuário. Não há upload pelo aplicativo. É preciso encerrar a viagem antes de usar os botões. Limites: 128 MB e 5 milhões de células por arquivo. Processamento em lotes de 1024 células, com cópia temporária no cache privado; importação inválida/cancelada não confirma alterações parciais.
+- **Visão geral:** Ver todas as descobertas enquadra o território do modo selecionado e desliga o acompanhamento da câmera. Abaixo de zoom 12 ou acima do limite de geometria detalhada, uma camada verde mostra cobertura aproximada, agregada em até 4000 retângulos por parte do viewport. Essa visualização não altera a exploração e pode abranger espaços não visitados entre células do mesmo bloco. A névoa permanece por baixo; aproximar retorna aos limites detalhados. O zoom mínimo agora é 2. Não requer carregar todas as células na memória.
+- **Destaque de descobertas:** viagens iniciadas na versão 0.4.0 guardam as células novas do último percurso numa tabela separada. Ao encerrar, elas ficam douradas por dois minutos na visão detalhada; o menu permite reativar ou esconder. O rastro por velocidade mantém suas cores. Viagens anteriores preservam área/rastro, mas não ganham destaque retroativo. A migração 4→5 apenas cria a tabela; começar outro percurso limpa só o destaque anterior daquele modo.
+- **Intensidade da névoa:** controle de 20% a 80%, salvo no aparelho. Ele altera apenas a aparência, sem revelar ou apagar células.
+- **Resumo ao encerrar:** abre automaticamente após uma viagem com dados, mostrando área nova, distância, tempo entre registros, paradas e presença de trechos sem continuidade. Pode ser reaberto pelo menu. Encerrar sem pontos não abre resumo do percurso anterior. Pausas e falta de sinal aparecem como tempo sem registro, sem inferir sua causa.
+- **Pausar e continuar:** no menu e na notificação da viagem real, pausa remove atualizações GPS do serviço, mantém a notificação e salva a ponta pendente. Continuar mantém a mesma viagem e cria um segmento independente; nenhum caminho é revelado entre os pontos antes/depois da pausa, mesmo numa pausa curta. Encerrar também funciona enquanto pausado. O GPS de prévia da atividade fica suspenso durante a viagem. Pausa não persiste como sessão retomável após morte do processo: reabrir mostra o rastro interrompido e permite começar outra viagem.
+- **Simulações adversas (debug):** escolha Percurso normal, Túnel sem sinal, GPS oscilando, Salto de posição ou Perda e retorno do sinal. Todos usam o filtro real e dados separados. Também é possível pausar a simulação. Os cenários levam cerca de dois minutos, além de pausas; não validam sensores, notificações ou segundo plano reais.
+
+### Testar as novas funções
+
+1. Execute cada cenário simulado, encerre e confira o resumo, as lacunas e o destaque dourado. O salto não deve gerar uma reta longa. A simulação termina ao sair do primeiro plano.
+2. Pause um percurso pelo menu, aguarde e continue: a linha recomeça em outro segmento. Repita a pausa/continuação pela notificação de uma viagem real.
+3. Ajuste a névoa, reabra o app e confira o valor. Use Ver todas as descobertas e aproxime/afaste: verde indica a visão aproximada; dourado indica células novas no detalhe.
+4. Exporte a exploração real; restaure o mesmo arquivo duas vezes. A segunda importação deve acrescentar zero células. Num outro aparelho, configure a chave do mapa e restaure o arquivo para consultar as descobertas.
+5. Selecione arquivo inválido/incompleto: deve aparecer orientação sem apagar dados. Encerre viagens antes de abrir o seletor de arquivos.
+6. Em aparelho real, confira bloqueio da tela, pausa, retorno, encerramento pela notificação, falta de internet e recuperação após interrupção. A ausência de um aparelho no ambiente impede validar esses itens aqui; consulte o relatório.
+
+## Recursos da versão 0.3.0
+
+- **Recuperação:** o último rastro incompleto é exibido automaticamente quando não há viagem ativa. O aviso distingue esse caso de um encerramento normal. O app recupera os dados em disco; não retoma o GPS, não conecta viagens diferentes e não promete registrar após parada forçada.
+- **Área nova por viagem:** o painel mostra a área de células inseridas pela primeira vez naquela viagem, com correção por latitude. Repetir locais soma zero. O valor é salvo atomicamente com as células, separado por modo, e permanece no percurso recuperado ou encerrado. O total vale para toda a viagem mesmo se o rastro atingir o limite de amostras. Percursos anteriores à versão 0.3.0 mostram área nova indisponível. A migração 3→4 preserva células e rastros.
+- **Precisão:** a etiqueta sobre o mapa e o menu mostram GPS bom (até 10 m), razoável (até 20 m), impreciso (acima de 20 m) ou sem sinal recente (mais de 10 s). Um círculo geográfico azul representa a incerteza reportada pelo sensor; desaparece quando a leitura fica antiga. É uma estimativa, não uma garantia de posição dentro do círculo. O indicador usa também leituras rejeitadas, sem revelá-las. A simulação não apresenta esse diagnóstico como GPS real.
+- **Rastro otimizado:** há fontes separadas para histórico consolidado, até 256 pontos recentes e no máximo dois pontos da ponta ao vivo. O histórico é reconstruído quando um bloco fecha ou a retenção remove pontos antigos; a ponta não reconstrói o trajeto inteiro. Rupturas de sinal são preservadas em todos os blocos. Ainda há leitura de snapshots Room e cálculo de paradas; ganhos reais de bateria e fluidez precisam de medição em aparelho.
+
+Para testar, faça uma viagem curta, encerre e consulte a área nova no menu. Repita o mesmo local: a segunda viagem deverá revelar pouca ou nenhuma área adicional, conforme a incerteza do GPS. A simulação limpa suas próprias descobertas em cada execução e não serve para testar repetição. Para recuperação, durante uma viagem real com pontos já salvos, force a parada pelo Android e reabra: o rastro deve aparecer como interrompido, sem notificação de gravação ativa. O registro não continua durante a parada forçada.
+
 ## Rastro por velocidade
 
 Inicie um **novo** percurso: a linha aparece **ao vivo**, assim que chegar uma leitura válida, e cresce com o trajeto. No tema padrão, é preto quando parado (velocidade estimada de até o limiar da atividade), verde-azulado escuro nos trechos lentos, progressivamente mais claro até verde-água muito claro a 60 km/h ou mais. Uma velocidade constante mantém a mesma tonalidade; desacelerar escurece o rastro. Trechos sem velocidade confiável ficam cinza. Ao tocar em **Encerrar exploração**, a última amostra é salva e o mapa tenta enquadrar o resultado, respeitando os controles flutuantes.
@@ -86,6 +163,7 @@ A velocidade nativa do GPS é preferida, desde que presente, plausível e com in
 Somente leituras aceitas pelo filtro de GPS alimentam o rastro. Lacunas, saltos e travessias do antimeridiano quebram os segmentos e reiniciam a análise de parada. A gravação é incremental junto com as células reveladas, numa transação Room; o encerramento também grava a última amostra pendente antes de publicar o resultado.
 
 O rastro é persistido a cada 5 segundos ou 35 metros, e mais frequentemente ao mudar significativamente de velocidade, entrar/sair de parada ou iniciar outro segmento. O ponto atual válido também estende a ponta ao vivo entre gravações, respeitando as rupturas de sinal. Mantemos até **20 mil amostras no último percurso de cada modo**, descartando as mais antigas se ultrapassar esse limite. A geometria e os resumos são montados em dispatchers de trabalho. O banco usa snapshots transacionais para não misturar pontos de viagens diferentes. Parada forçada/morte abrupta do processo pode deixar um percurso incompleto, que não é publicado como encerrado; não há recuperação automática desse rastro.
+O rastro é persistido a cada 5 segundos ou 35 metros, e mais frequentemente ao mudar significativamente de velocidade, entrar/sair de parada ou iniciar outro segmento. O ponto atual válido também estende a ponta ao vivo entre gravações, respeitando as rupturas de sinal. Mantemos até **20 mil amostras por modo**, descartando as mais antigas se ultrapassar esse limite. A geometria e os resumos são montados em dispatchers de trabalho. O banco usa snapshots transacionais para não misturar pontos de viagens diferentes. Parada forçada/morte abrupta do processo pode deixar um percurso incompleto. Ao reabrir, o último trecho persistido reaparece como **Percurso interrompido • recuperado**, sem reiniciar o serviço. Leituras que ainda estavam na fila ou na ponta ao vivo podem ser perdidas.
 
 Teste sem dirigir: abra o menu, ative **Trajeto simulado** e aguarde cerca de 45 segundos (mais o tempo de processamento do aparelho). A reprodução de carro é 8×; caminhada e bicicleta usam tempo virtual e velocidades adequados ao modo, com acelerações, cruzeiro, desacelerações, trechos lentos e paradas. A linha final deve mostrar tonalidades diferentes e trechos pretos, sem marcadores de parada. O resumo usa o tempo virtual do trajeto, e não o tempo de espera na tela. Feche e reabra, ative o modo simulado e confira o mesmo rastro; iniciar outra simulação substitui-o.
 
@@ -102,6 +180,7 @@ O serviço não reinicia automaticamente após morte do processo (`START_NOT_STI
 ## Trajeto simulado
 
 Disponível somente no build **debug**. Abra o menu, ative **Trajeto simulado** e toque em **Iniciar trajeto simulado**. Um trajeto de aproximadamente 3,3 km no centro de Curitiba segue uma polilinha de ruas obtida do OSRM/OpenStreetMap. A geometria está incorporada ao app e não exige consulta de roteamento durante o teste. A reprodução usa uma atualização a cada 125 ms (carro em 8×; caminhada/bicicleta ajustam o tempo virtual, cerca de 45 segundos mais processamento), com velocidades variadas, curvas e paradas. O mesmo filtro, rasterização, análise de velocidade e repositório do GPS processam as leituras; o relógio virtual fica restrito à simulação. Dados geográficos © OpenStreetMap contributors, ODbL; geometria consultada em 15/10/2026, sem garantia de refletir alterações posteriores no trânsito. O indicador sobre o mapa e o painel identificam **MODO SIMULADO**.
+Disponível somente no build **debug**. Abra o menu, ative **Trajeto simulado** e toque em **Iniciar trajeto simulado**. Um trajeto de aproximadamente 1 km no centro de Curitiba dura cerca de dois minutos e usa o mesmo filtro, rasterização, análise de velocidade e repositório do GPS. O indicador sobre o mapa e o painel identificam **MODO SIMULADO**.
 
 Não exige permissão de localização. Os dados usam o namespace `simulation` no banco, separado de `real`; cada novo teste limpa somente a simulação. Ela é interrompida quando a tela sai do primeiro plano e não valida o serviço em segundo plano. Após encerrar, o mapa simulado pode ser consultado. A exploração real continua intacta ao voltar ao modo real.
 
@@ -117,7 +196,7 @@ Room faz `INSERT OR IGNORE` para as células por lote/fixação em transação. 
 
 Para renderizar, consultamos apenas células dentro do retângulo visível por índice `(mode,y,x)`. Comprimimos células adjacentes em faixas, fazemos união topológica com JTS e subtraímos do polígono mundial. Isso evita buracos sobrepostos inválidos. Cálculos e consultas ficam em dispatchers de trabalho; resultados antigos são cancelados ao mudar câmera/modo. A camada de névoa acompanha zoom, rotação e deslocamento do MapLibre.
 
-O zoom mínimo é **8**, máximo 20, para permitir uma visão mais ampla do rastro, e cada geometria de névoa é limitada a **60 mil células**. Ao exceder o limite, o app mantém a névoa conservadora e pede aproximação; o rastro continua visível acima dela. Essa escolha evita construir uma união mundial enorme. A exploração é suportada entre latitudes -85° e +85°. Nas bordas do antimeridiano, segmentos são separados; esse caso merece validação visual em aparelho. Não há compactação avançada de territórios continentais neste MVP.
+O zoom mínimo é **2**, máximo 20, para permitir uma visão mais ampla do rastro, e cada geometria de névoa é limitada a **60 mil células**. Em zoom menor que 12 ou ao exceder o limite, o app mantém a névoa e exibe uma cobertura aproximada em verde, com indicação para aproximar; o rastro continua visível acima dela. Essa escolha evita construir uma união mundial enorme. A exploração é suportada entre latitudes -85° e +85°. Nas bordas do antimeridiano, segmentos são separados; esse caso merece validação visual em aparelho. Não há compactação avançada de territórios continentais neste MVP.
 
 ## Mapa, dados e provedor
 
