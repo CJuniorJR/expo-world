@@ -23,14 +23,23 @@ class ExplorationProcessor(private val app: WorldApp, private val mode: String, 
     }
     suspend fun ingest(fix: Fix, now: Double): Boolean {
         return when (val result = filter.accept(fix, now)) {
-            is FilterResult.Rejected -> { trace.breakContinuity(); coverageWindow.reset(); app.tracking.update { it.copy(message = result.message) }; false }
+            is FilterResult.Rejected -> {
+                coverageWindow.reset()
+                // Retain rejected readings for chronology/audit, never reveal or draw them.
+                val sample = trace.reject(fix)
+                app.repository.saveAccepted(mode, emptySet(), sample, startedAt.takeUnless { begun }, activity.key)
+                begun = true
+                app.tracking.update { it.copy(liveHead = null, revision = it.revision + 1, message = result.message) }
+                false
+            }
             is FilterResult.Accepted -> {
                 val cells = withContext(Dispatchers.Default) { Revealer.cells(result.fix, result.previous) }
                 val (version, matches) = app.city.match(coverageWindow.previousFor(result.fix, result.previous != null), result.fix, activity)
                 val visits = matches.filter { credited.add(it.streetId to it.bin) }.map {
                     br.com.expoworld.storage.StreetVisit(mode, activity.key, version, it.streetId, it.bin, it.neighborhoodId, it.meters)
                 }
-                val sample = trace.accept(result.fix, result.previous != null)
+                val sample = trace.accept(result.fix, result.previous != null,
+                    matches.map { "$version:${it.streetId}" }.distinct().sorted().joinToString("|").ifBlank { null })
                 app.repository.saveAccepted(mode, cells, sample, startedAt.takeUnless { begun }, activity.key, visits, trace.liveHead()?.elapsedSeconds ?: -1.0,
                     System.currentTimeMillis() - ((now - fix.monotonicSeconds).coerceAtLeast(0.0) * 1000).toLong())
                 begun = true

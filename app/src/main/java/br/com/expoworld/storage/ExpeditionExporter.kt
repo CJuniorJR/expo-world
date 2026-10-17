@@ -36,9 +36,10 @@ class ExpeditionExporter(private val app: WorldApp) {
                             val palette = ExpeditionPalette.from(pixels, intArrayOf(0x000000, 0xFFFFFF,
                                 0x101C22, 0xFFD166, theme.accent, theme.traceDark, theme.traceLight))
                             val gif = ExpeditionGif(output, width, height, palette.colors)
+                            val timeline = TraceRenderTimeline(route.activity.stopKmh)
                             for (frame in 0 until 100) {
                                 coroutineContext.ensureActive()
-                                ExpeditionRenderer.draw(Canvas(bitmap), ExpeditionArt.scene(route, title, date, frame / 99f, theme, map.point), width.toFloat(), height.toFloat(), true, map.bitmap)
+                                ExpeditionRenderer.draw(Canvas(bitmap), ExpeditionArt.scene(route, title, date, frame / 99f, theme, map.point, timeline), width.toFloat(), height.toFloat(), true, map.bitmap)
                                 bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
                                 palette.index(pixels, indexed)
                                 gif.frame(indexed, if (frame == 99) 150 else 10)

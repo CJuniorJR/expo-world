@@ -68,16 +68,15 @@ object ReplayTimeline {
         while (low < high) { val mid = (low + high) / 2; if (samples[mid].elapsedSeconds <= time) low = mid + 1 else high = mid }
         val prefix = samples.subList(0, low.coerceAtLeast(1))
         val a = prefix.last(); val b = samples.getOrNull(low) ?: return prefix
-        if (b.breakBefore || b.elapsedSeconds <= a.elapsedSeconds || time <= a.elapsedSeconds) return prefix
+        if (!a.accepted || !b.accepted || b.breakBefore || b.elapsedSeconds <= a.elapsedSeconds || time <= a.elapsedSeconds) return prefix
         val t = (time - a.elapsedSeconds) / (b.elapsedSeconds - a.elapsedSeconds)
         val lon = a.longitude + (b.longitude - a.longitude) * t
         if (kotlin.math.abs(b.longitude - a.longitude) > 180) return prefix
         val speed = if (a.speedKmh != null && b.speedKmh != null) a.speedKmh + (b.speedKmh - a.speedKmh) * t else null
-        return prefix + a.copy(latitude = a.latitude + (b.latitude - a.latitude) * t, longitude = lon,
-            elapsedSeconds = time, speedKmh = speed, breakBefore = false)
+        return TracePrefix(prefix, prefix.size, a.copy(latitude = a.latitude + (b.latitude - a.latitude) * t, longitude = lon,
+            elapsedSeconds = time, speedKmh = speed, breakBefore = false))
     }
     fun visualSamples(samples: List<TraceSample>): List<TraceSample> {
-        val stride = (samples.size / 1800).coerceAtLeast(1)
-        return samples.filterIndexed { i, sample -> i == 0 || i == samples.lastIndex || i % stride == 0 || sample.breakBefore || samples.getOrNull(i + 1)?.breakBefore == true }
+        return samples // Replay must retain every passage, including short loops between GPS readings.
     }
 }

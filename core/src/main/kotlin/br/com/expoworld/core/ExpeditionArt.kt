@@ -16,7 +16,7 @@ object ExpeditionArt {
     fun title(input: String) = input.filter { !it.isISOControl() }.trim().take(40).ifBlank { "Minha expedição" }
     private fun area(value: Double?) = value?.let { if (it >= 10_000) String.format(java.util.Locale.forLanguageTag("pt-BR"), "%.2f km²", it / 1_000_000) else "${it.toInt()} m²" } ?: "—"
     fun scene(trace: RecordedTrace, inputTitle: String, dateLabel: String, fraction: Float = 1f, theme: ExplorerTheme = ExplorerTheme.GREEN,
-        mapPoint: ((TraceSample) -> XY)? = null): List<ArtCommand> = buildList {
+        mapPoint: ((TraceSample) -> XY)? = null, timeline: TraceRenderTimeline? = null): List<ArtCommand> = buildList {
         val mint = ExplorerTheme.hex(theme.accent); val muted = "#AFBFC6"; val gold = "#FFD166"
         add(ArtCommand.Text(80.0, 90.0, "EXPO WORLD / ATLAS PESSOAL", mint, 24.0, true))
         val name = title(inputTitle)
@@ -26,7 +26,7 @@ object ExpeditionArt {
         add(ArtCommand.Text(80.0, 270.0, dateLabel + if (trace.mode == "simulation") " / SIMULADO" else " / EXPLORAÇÃO", muted, 24.0))
         if (mapPoint == null) for (x in 80..1000 step 80) add(ArtCommand.Line(x.toDouble(), 330.0, x.toDouble(), 1030.0, "#1C3038", 1.0))
         if (mapPoint == null) for (y in 330..1030 step 70) add(ArtCommand.Line(80.0, y.toDouble(), 1000.0, y.toDouble(), "#1C3038", 1.0))
-        val all = ReplayTimeline.visualSamples(trace.samples)
+        val all = trace.samples.filter { it.accepted }
         if (all.isNotEmpty()) {
             val origin = Geo.project(all.first().latitude, all.first().longitude).x
             val circumference = 2 * PI * Geo.R
@@ -43,29 +43,15 @@ object ExpeditionArt {
                 val p = projected(sample)
                 return XY(540 + (p.x - (west + east) / 2) * scale, 680 - (p.y - (south + north) / 2) * scale)
             }
-            val frame = ReplayTimeline.frame(all, fraction)
-            frame.zipWithNext().filter { !it.second.breakBefore }.forEach { (a, b) ->
-                val p = point(a); val q = point(b)
-                add(ArtCommand.Line(p.x, p.y, q.x, q.y, "#0A1218", 20.0))
+            val frame = ReplayTimeline.frame(trace.samples, fraction)
+            val pieces = (timeline ?: TraceRenderTimeline(trace.activity.stopKmh)).frame(frame)
+            fun vertex(v: TraceVertex): XY = point(all.first().copy(latitude = v.latitude, longitude = v.longitude, elapsedSeconds = v.elapsedSeconds))
+            for (outline in listOf(true, false)) pieces.forEach { piece ->
+                val p = vertex(piece.from); val q = vertex(piece.to)
+                val color = if (outline) "#0A1218" else TracePresentation.color(piece.speedKmh, trace.activity.brightKmh, trace.activity.stopKmh, theme)
+                add(ArtCommand.Line(p.x, p.y, q.x, q.y, color, if (outline) 20.0 else 10.0))
             }
-            frame.zipWithNext().filter { !it.second.breakBefore }.forEach { (a, b) ->
-                val p = point(a); val q = point(b)
-                add(ArtCommand.Line(p.x, p.y, q.x, q.y, TracePresentation.color(b.speedKmh, trace.activity.brightKmh, trace.activity.stopKmh, theme), 10.0))
-            }
-            // Reuse the presentation rule for zero-length stopped fixes and signal gaps.
-            val stopSegments = mutableSetOf<Int>()
-            var lastMoving: Int? = null
-            for (i in 1 until frame.size) {
-                val a = frame[i - 1]; val b = frame[i]
-                if (b.breakBefore) { lastMoving = null; continue }
-                if (a.latitude != b.latitude || a.longitude != b.longitude) lastMoving = i
-                if (b.speedKmh?.let { it <= trace.activity.stopKmh } == true) lastMoving?.let { stopSegments.add(it) }
-            }
-            stopSegments.forEach { i ->
-                val a = point(frame[i - 1]); val b = point(frame[i])
-                add(ArtCommand.Line(a.x, a.y, b.x, b.y, "#000000", 10.0))
-            }
-            val start = point(all.first()); val end = point(frame.last())
+            val start = point(all.first()); val end = point(frame.lastOrNull { it.accepted } ?: all.first())
             add(ArtCommand.Circle(start.x, start.y, 16.0, gold))
             add(ArtCommand.Circle(end.x, end.y, 23.0, "#FFFFFF"))
             add(ArtCommand.Circle(end.x, end.y, 16.0, mint))

@@ -23,8 +23,9 @@ object ExpeditionMapLoader {
             if (BuildConfig.MAPTILER_KEY.isBlank()) throw MapExportUnavailable()
             "https://api.maptiler.com/maps/streets-v4/style.json?key=${BuildConfig.MAPTILER_KEY}"
         }
-        val positions = route.samples.map { Geo.project(it.latitude, it.longitude) }
-        if (positions.isEmpty() || route.samples.maxOf { it.longitude } - route.samples.minOf { it.longitude } > 180) throw MapExportUnavailable()
+        val samples = route.samples.filter { it.accepted }
+        val positions = samples.map { Geo.project(it.latitude, it.longitude) }
+        if (positions.isEmpty() || samples.maxOf { it.longitude } - samples.minOf { it.longitude } > 180) throw MapExportUnavailable()
         var minX = positions.minOf { it.x }; var maxX = positions.maxOf { it.x }
         var minY = positions.minOf { it.y }; var maxY = positions.maxOf { it.y }
         val centerX = (minX + maxX) / 2; val centerY = (minY + maxY) / 2

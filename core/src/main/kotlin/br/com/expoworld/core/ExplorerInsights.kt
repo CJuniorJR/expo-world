@@ -36,7 +36,7 @@ data class TripSummary(
             var knownSpeedSeconds = 0.0
             points.zipWithNext().forEach { (a, b) ->
                 val dt = b.elapsedSeconds - a.elapsedSeconds
-                if (!b.breakBefore && dt > 0) {
+                if (a.accepted && b.accepted && !b.breakBefore && dt > 0) {
                     tracked += dt
                     // Don't turn coordinate drift while standing still into mileage.
                     if (a.stopId < 0 || a.stopId != b.stopId) {

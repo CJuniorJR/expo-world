@@ -10,7 +10,7 @@ root = Path(__file__).resolve().parent.parent
 schemas = root / 'app/schemas/br.com.expoworld.storage.ExplorationDatabase'
 source = (root / 'app/src/main/java/br/com/expoworld/storage/ExplorationDatabase.kt').read_text(encoding='utf-8')
 normalizer = (root / 'app/src/main/java/br/com/expoworld/storage/UnifiedMigration.kt').read_text(encoding='utf-8')
-expected = json.loads((schemas / '8.json').read_text(encoding='utf-8'))['database']
+expected = json.loads((schemas / '9.json').read_text(encoding='utf-8'))['database']
 create = re.findall(r'db.execSQL\("(CREATE [^"\n]+)"\)', normalizer)
 columns = re.findall(r'ensureColumn\("([^"\n]+)", "([^"\n]+)", "([^"\n]+)"\)', normalizer)
 assert len(create) == 5 and len(columns) == 5
@@ -25,7 +25,7 @@ def normalize(db):
     for table, column, definition in columns:
         if column not in names(db,table): db.execute('ALTER TABLE '+table+' ADD COLUMN '+column+' '+definition)
 
-versions = [(str(v), schemas / (str(v)+'.json')) for v in range(1,8)]
+versions = [(str(v), schemas / (str(v)+'.json')) for v in range(1,9)]
 versions += [('home-'+str(v), root / ('app/schemas/legacy-home/br.com.expoworld.storage.ExplorationDatabase/'+str(v)+'.json')) for v in [4,5]]
 for label, path in versions:
     schema=json.loads(path.read_text(encoding='utf-8'))['database']; version=schema['version']
@@ -47,6 +47,8 @@ for label, path in versions:
     for start in range(version,3):
         for statement in migrations[start]: db.execute(statement)
     normalize(db);normalize(db)  # Safe for either version-4/5 schema and idempotent.
+    upgrade9 = re.search(r'val MIGRATION_8_9 = object.*?override fun migrate.*?\{(.*?)\n    }\n}', normalizer, re.S).group(1)
+    for statement in re.findall(r'db.execSQL\("([^"\n]+)"\)', upgrade9): db.execute(statement)
     for entity in expected['entities']:
         actual=db.execute('PRAGMA table_info('+entity['tableName']+')').fetchall(); primary=entity['primaryKey']['columnNames']
         wanted={f['columnName']:(f['affinity'],int(f.get('notNull',False)), primary.index(f['columnName'])+1 if f['columnName'] in primary else 0, f.get('defaultValue')) for f in entity['fields']}
@@ -71,5 +73,18 @@ for label, path in versions:
     assert {table:db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0] for table in before}==before
     assert db.execute("SELECT title FROM planned_routes WHERE id='plan'").fetchone()==('Volta',)
     db.close()
-    print('PASS:',label,'-> 8: cells, trips, titles/dates/credits preserved; unified schema, repeat-safe normalizer and shared unique street totals.')
-print('PASS: all nine historical schema variants from both branches; host SQLite (device tests still required).')
+    print('PASS:',label,'-> 9: cells, trips, titles/dates/credits preserved; unified schema, repeat-safe normalizer and shared unique street totals.')
+print('PASS: all ten historical schema variants from both branches; host SQLite (device tests still required).')
+
+# Exercise the actual DAO query beyond the old truncation boundary, with a return pass.
+db = sqlite3.connect(':memory:')
+for entity in expected['entities']: db.execute(entity['createSql'].replace('${TABLE_NAME}',entity['tableName']))
+db.executemany("INSERT INTO route_samples(mode,sequence,latitude,longitude,elapsedSeconds,speedKmh,breakBefore,stopId,stopSeconds,accuracyMeters,accepted,rawSpeedMetersSecond,monotonicSeconds,streetIds) VALUES ('real',?,-25.43,?,?,12,0,-1,0,5,1,3.33,?,'v:road')", [(i, -49.27 + min(i,40001-i)*.000001, float(i),1000.+i) for i in range(40002)])
+query = next(q for q in queries if q.startswith('SELECT * FROM route_samples WHERE mode = :mode ORDER BY'))
+rows = db.execute(query,{'mode':'real'}).fetchall()
+assert len(rows) == 40002 and rows[0][1] == 0 and rows[-1][1] == 40001
+assert rows[0][3] == rows[-1][3]  # Return to origin survives.
+assert all(row[9] == 5 and row[10] == 1 and row[13] == 'v:road' for row in rows)
+assert 'trimSamples' not in source and 'DELETE FROM route_samples WHERE mode = :mode AND sequence' not in source
+assert '@Insert(onConflict = OnConflictStrategy.ABORT)\n    suspend fun putSample' in source
+print('PASS: DAO reads all 40002 chronological points, original metadata/repeated passages preserved; no trimming or replacement insert.')

@@ -77,7 +77,9 @@ class ExplorationService : Service(), LocationListener {
                 try {
                     processor.begin()
                     for (event in queue) when (event) {
-                        is Event.Position -> if (!paused && processor.ingest(event.fix, now())) lastValid = now()
+                        // Callbacks stop immediately on pause. Drain readings already queued
+                        // before the ordered Pause event instead of silently dropping history.
+                        is Event.Position -> if (processor.ingest(event.fix, now())) lastValid = now()
                         Event.Pause -> processor.pause()
                         Event.Resume -> {
                             processor.breakContinuity()

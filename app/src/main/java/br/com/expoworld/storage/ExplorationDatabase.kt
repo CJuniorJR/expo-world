@@ -4,7 +4,6 @@ import androidx.room.*
 import br.com.expoworld.core.Cell
 import br.com.expoworld.core.CellBounds
 import br.com.expoworld.core.ExplorationConfig
-import br.com.expoworld.core.TraceConfig
 import br.com.expoworld.core.TraceSample
 import br.com.expoworld.core.RecordedTrace
 import androidx.room.migration.Migration
@@ -37,7 +36,12 @@ data class RouteSession(@PrimaryKey val mode: String, val startedAtMillis: Long,
 data class RouteSampleRow(
     val mode: String, val sequence: Int, val latitude: Double, val longitude: Double,
     val elapsedSeconds: Double, val speedKmh: Double?, val breakBefore: Boolean,
-    val stopId: Int, val stopSeconds: Double
+    val stopId: Int, val stopSeconds: Double,
+    @ColumnInfo(defaultValue = "NULL") val accuracyMeters: Double? = null,
+    @ColumnInfo(defaultValue = "1") val accepted: Boolean = true,
+    @ColumnInfo(defaultValue = "NULL") val rawSpeedMetersSecond: Double? = null,
+    @ColumnInfo(defaultValue = "NULL") val monotonicSeconds: Double? = null,
+    @ColumnInfo(defaultValue = "NULL") val streetIds: String? = null
 )
 
 data class RouteSnapshot(
@@ -59,9 +63,10 @@ data class PlannedRouteRow(@PrimaryKey val id: String, val title: String, val cr
 
 data class NeighborhoodMeters(val neighborhoodId: String, val meters: Double)
 
-private fun RouteSampleRow.toDomain() = TraceSample(sequence, latitude, longitude, elapsedSeconds, speedKmh, breakBefore, stopId, stopSeconds)
+private fun RouteSampleRow.toDomain() = TraceSample(sequence, latitude, longitude, elapsedSeconds, speedKmh, breakBefore, stopId, stopSeconds,
+    accuracyMeters, accepted, rawSpeedMetersSecond, monotonicSeconds, streetIds)
 private fun TraceSample.toRow(mode: String) = RouteSampleRow(mode, sequence, latitude, longitude,
-    elapsedSeconds, speedKmh, breakBefore, stopId, stopSeconds)
+    elapsedSeconds, speedKmh, breakBefore, stopId, stopSeconds, accuracyMeters, accepted, rawSpeedMetersSecond, monotonicSeconds, streetIds)
 
 @Dao
 interface ExplorationDao {
@@ -127,14 +132,12 @@ interface ExplorationDao {
     suspend fun clearSimulation()
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun putSession(session: RouteSession)
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun putSample(sample: RouteSampleRow)
     @Query("DELETE FROM route_samples WHERE mode = :mode")
     suspend fun deleteSamples(mode: String)
     @Query("DELETE FROM route_sessions WHERE mode = 'simulation'")
     suspend fun deleteSimulationSession()
-    @Query("DELETE FROM route_samples WHERE mode = :mode AND sequence < :minSequence")
-    suspend fun trimSamples(mode: String, minSequence: Int)
     @Query("UPDATE route_sessions SET completed = 1, endedAtMillis = :endedAt WHERE mode = :mode")
     suspend fun completeSession(mode: String, endedAt: Long)
     @Query("SELECT * FROM route_sessions WHERE mode = :mode AND completed = 1")
@@ -142,7 +145,7 @@ interface ExplorationDao {
     @Transaction
     @Query("SELECT * FROM route_sessions WHERE mode = :mode")
     fun routeSnapshot(mode: String): Flow<RouteSnapshot?>
-    @Query("SELECT * FROM route_samples WHERE mode = :mode ORDER BY sequence ASC LIMIT 20000")
+    @Query("SELECT * FROM route_samples WHERE mode = :mode ORDER BY sequence ASC")
     suspend fun samples(mode: String): List<RouteSampleRow>
     @Transaction
     suspend fun beginRoute(mode: String, startedAt: Long, activity: String = "car") {
@@ -164,12 +167,11 @@ interface ExplorationDao {
         }
         if (sample != null) {
             putSample(sample)
-            trimSamples(sample.mode, sample.sequence - TraceConfig.MAX_SAMPLES + 1)
         }
     }
     @Transaction
     suspend fun finishRoute(mode: String, endedAt: Long, last: RouteSampleRow?) {
-        if (last != null) { putSample(last); trimSamples(mode, last.sequence - TraceConfig.MAX_SAMPLES + 1) }
+        if (last != null) putSample(last)
         completeSession(mode, endedAt)
     }
     @Transaction
@@ -178,7 +180,7 @@ interface ExplorationDao {
     }
 }
 
-@Database(entities = [ExploredCell::class, TripCell::class, RouteSession::class, RouteSampleRow::class, SavedRoute::class, StreetVisit::class, PlannedRouteRow::class], version = 8, exportSchema = true)
+@Database(entities = [ExploredCell::class, TripCell::class, RouteSession::class, RouteSampleRow::class, SavedRoute::class, StreetVisit::class, PlannedRouteRow::class], version = 9, exportSchema = true)
 abstract class ExplorationDatabase : RoomDatabase() { abstract fun cells(): ExplorationDao }
 
 

@@ -44,7 +44,12 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
     private var liveHead: TraceSample? = null
     private var renderedTail: List<Any?>? = null
     private var pendingTail: List<Any?>? = null
-    private var renderedHistory: List<Any?>? = null
+    private val traceMutex = Mutex()
+    private var traceTimeline: TraceRenderTimeline? = null
+    private var traceSessionKey: List<Any?>? = null
+    private var encodedPieces: List<TracePiece>? = null
+    private var encodedPalette: List<String>? = null
+    private var encodedTrace: Pair<String, String>? = null
     private var focusPending: RecordedTrace? = null
     private val emptyFeatures = """{"type":"FeatureCollection","features":[]}"""
     private val fogMutex = Mutex()
@@ -66,7 +71,6 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
     private var visualRunning = false
     private var visualRunToken = 0
     private var replaySamples: List<TraceSample> = emptyList()
-    private var replayRouteKey: List<Any?>? = null
     val configured = BuildConfig.MAP_STYLE_URL.isNotBlank() || BuildConfig.MAPTILER_KEY.isNotBlank()
     private val fallback = """{"version":8,"sources":{},"layers":[{"id":"background","type":"background","paint":{"background-color":"#bbc7c3"}}]}"""
 
@@ -135,7 +139,7 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
         }
         m.setStyle(builder) { s ->
             style = s
-            renderedTail = null; renderedHistory = null; pendingTail = null
+            renderedTail = null; pendingTail = null
             s.addSource(GeoJsonSource("fog", FogGeometry.geoJson(emptyList())))
             s.addLayer(FillLayer("fog-fill", "fog").withProperties(fillColor("#101820"), fillOpacity(fogOpacity), fillAntialias(true)))
             s.addSource(GeoJsonSource("neighborhoods", emptyFeatures))
@@ -166,13 +170,13 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
                 lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
             s.addLayer(LineLayer("speed-route-color", "speed-route").withProperties(lineColor(Expression.get("color")), lineWidth(6f),
                 lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
-            listOf("speed-recent", "speed-live").forEach { id ->
-                s.addSource(GeoJsonSource(id, emptyFeatures))
-                s.addLayer(LineLayer("$id-outline", id).withProperties(lineColor("#102027"), lineWidth(10f),
-                    lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
-                s.addLayer(LineLayer("$id-color", id).withProperties(lineColor(Expression.get("color")), lineWidth(6f),
-                    lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
-            }
+            s.addImage("trace-arrow", traceArrow())
+            s.addSource(GeoJsonSource("trace-directions", emptyFeatures))
+            s.addLayer(SymbolLayer("trace-direction-arrows", "trace-directions").withProperties(
+                iconImage("trace-arrow"), iconSize(.65f), iconRotate(Expression.get("bearing")),
+                iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+                iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_MAP), iconAllowOverlap(false)
+            ).apply { minZoom = 14f })
             s.addSource(GeoJsonSource("accuracy", AccuracyGeometry.geoJson(accuracyFix)))
             s.addLayer(FillLayer("accuracy-fill", "accuracy").withProperties(fillColor("#69ABFF"), fillOpacity(.16f)))
             s.addLayer(LineLayer("accuracy-border", "accuracy").withProperties(lineColor("#69ABFF"), lineWidth(1.5f)))
@@ -294,7 +298,7 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
                 style?.getSourceAs<GeoJsonSource>("accuracy")?.setGeoJson(emptyFeatures)
                 trace?.let { focusTrace(it) }
             } else { updatePosition(position); updateAccuracy(accuracyFix) }
-            renderedTail = null; renderedHistory = null; pendingTail = null
+            renderedTail = null; pendingTail = null
             refreshFog()
         }
         if (value == MapPresentation.REPLAY) renderTrace()
@@ -366,52 +370,74 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
     private fun renderTrace() {
         val s = style ?: return
         val original = trace
-        val routeKey = listOf(original?.mode, original?.startedAtMillis, original?.samples?.size, original?.samples?.firstOrNull(), original?.samples?.lastOrNull())
-        if (routeKey != replayRouteKey) { replayRouteKey = routeKey; replaySamples = ReplayTimeline.visualSamples(original?.samples.orEmpty()) }
-        val data = if (presentation == MapPresentation.REPLAY && original != null)
-            original.copy(samples = ReplayTimeline.frame(replaySamples, replayFraction)) else original
-        s.getSourceAs<GeoJsonSource>("replay-head")?.setGeoJson(
-            if (presentation == MapPresentation.REPLAY) data?.samples?.lastOrNull()?.let { Feature.fromGeometry(Point.fromLngLat(it.longitude, it.latitude)).toJson() } ?: emptyFeatures else emptyFeatures)
-        if (data == null) {
+        // Replay always reads the original chronology, without stride/route simplification.
+        replaySamples = original?.samples.orEmpty()
+        if (original == null) {
             traceJob?.cancel()
-            renderedTail = null; renderedHistory = null; pendingTail = null
-            listOf("speed-route", "speed-recent", "speed-live").forEach {
+            renderedTail = null; pendingTail = null
+            listOf("speed-route", "trace-directions", "replay-head").forEach {
                 s.getSourceAs<GeoJsonSource>(it)?.setGeoJson(emptyFeatures)
             }
             return
         }
-        s.getSourceAs<GeoJsonSource>("speed-live")?.setGeoJson(
-            TracePresentation.lineGeoJson(TraceChunks.live(data.samples, liveHead), data.activity, theme))
         val palette = theme
-        val key = listOf(theme.key, data.activity.key, data.mode, data.startedAtMillis, data.samples.firstOrNull()?.sequence, data.samples.size, data.samples.lastOrNull())
+        val replay = presentation == MapPresentation.REPLAY
+        val fraction = replayFraction
+        val head = if (replay) null else liveHead
+        val sessionKey = listOf(original.mode, original.startedAtMillis, original.activity.key, original.samples.firstOrNull())
+        val key = sessionKey + listOf(palette.key, original.samples.size, original.samples.lastOrNull(), head, replay, if (replay) fraction else null)
         if (key == renderedTail || key == pendingTail) return
         traceJob?.cancel()
         pendingTail = key
-        val window = TraceChunks.split(data.samples)
-        val historyKey = listOf(theme.key, data.activity.key, data.mode, data.startedAtMillis, window.history.firstOrNull()?.sequence, window.history.lastOrNull()?.sequence)
-        val historyChanged = historyKey != renderedHistory
         traceJob = scope.launch {
             val json = withContext(Dispatchers.Default) {
-                Triple(if (historyChanged) TracePresentation.lineGeoJson(window.history, data.activity, palette) else null,
-                    TracePresentation.lineGeoJson(window.recent, data.activity, palette), "")
+                traceMutex.withLock {
+                    ensureActive()
+                    if (sessionKey != traceSessionKey) {
+                        traceTimeline = TraceRenderTimeline(original.activity.stopKmh); traceSessionKey = sessionKey
+                    }
+                    val samples = if (replay) ReplayTimeline.frame(original.samples, fraction)
+                        else TracePresentation.withLiveHead(original.samples, head)
+                    val pieces = checkNotNull(traceTimeline).frame(samples) { ensureActive() }
+                    val colors = listOf(palette.key, original.activity.key)
+                    val encoded = if (pieces === encodedPieces && colors == encodedPalette) checkNotNull(encodedTrace) else {
+                        (ConsolidatedTracePresentation.lines(pieces, original.activity, palette) to ConsolidatedTracePresentation.directions(pieces))
+                            .also { encodedPieces = pieces; encodedPalette = colors; encodedTrace = it }
+                    }
+                    val marker = if (replay) samples.lastOrNull { it.accepted }?.let {
+                        Feature.fromGeometry(Point.fromLngLat(it.longitude, it.latitude)).toJson()
+                    } ?: emptyFeatures else emptyFeatures
+                    Triple(encoded.first, encoded.second, marker)
+                }
             }
             ensureActive()
             if (style === s) {
-                json.first?.let { s.getSourceAs<GeoJsonSource>("speed-route")?.setGeoJson(it) }
-                s.getSourceAs<GeoJsonSource>("speed-recent")?.setGeoJson(json.second)
-                renderedTail = key; renderedHistory = historyKey; pendingTail = null
+                s.getSourceAs<GeoJsonSource>("speed-route")?.setGeoJson(json.first)
+                s.getSourceAs<GeoJsonSource>("trace-directions")?.setGeoJson(json.second)
+                s.getSourceAs<GeoJsonSource>("replay-head")?.setGeoJson(json.third)
+                renderedTail = key; pendingTail = null
             }
         }
+    }
+    private fun traceArrow(): Bitmap = Bitmap.createBitmap(28, 28, Bitmap.Config.ARGB_8888).apply {
+        val path = android.graphics.Path().apply { moveTo(14f, 3f); lineTo(23f, 23f); lineTo(14f, 18f); lineTo(5f, 23f); close() }
+        val canvas = android.graphics.Canvas(this)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = PixelColor.rgb(16, 28, 34); style = android.graphics.Paint.Style.STROKE; strokeWidth = 3f
+        }
+        canvas.drawPath(path, paint)
+        paint.style = android.graphics.Paint.Style.FILL; paint.color = PixelColor.WHITE
+        canvas.drawPath(path, paint)
     }
     fun focusTrace(data: RecordedTrace) {
         focusPending = data
         val m = map ?: return
-        if (style == null || data.samples.isEmpty()) return
+        if (style == null || data.samples.none { it.accepted }) return
         if (view.width <= 0 || view.height <= 0) {
             view.doOnLayout { if (trace === data) focusTrace(data) }
             return
         }
-        val points = data.samples
+        val points = data.samples.filter { it.accepted }
         val west = points.minOf { it.longitude }; val east = points.maxOf { it.longitude }
         if (points.size == 1 || east - west > 180 || (west == east && points.minOf { it.latitude } == points.maxOf { it.latitude })) {
             val last = points.last()

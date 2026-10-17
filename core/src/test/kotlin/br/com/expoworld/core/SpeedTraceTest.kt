@@ -96,6 +96,7 @@ class SpeedTraceTest {
         assertEquals(2, live.size)
         assertTrue(TracePresentation.lineGeoJson(live).contains("LineString"))
         assertEquals(live, TracePresentation.withLiveHead(live, stored))
+        assertEquals(listOf(stored), TracePresentation.withLiveHead(listOf(stored), sampler.liveHead()!!.copy(sequence = stored.sequence + 2)))
         sampler.breakContinuity()
         sampler.accept(fix(2, x = 10.0, speed = 5.0), true)
         val broken = TracePresentation.withLiveHead(listOf(stored), sampler.liveHead())

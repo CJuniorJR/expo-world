@@ -13,7 +13,7 @@ class ExplorationFeaturesTest {
         assertTrue(CoverageGeometry.geoJson(rows).contains("Polygon"))
     }
     @Test fun difficultScenariosRejectBadPointsAndRecoverWithoutBridging() {
-        for (scenario in SimulationScenario.entries.filter { it != SimulationScenario.NORMAL }) {
+        for (scenario in listOf(SimulationScenario.TUNNEL, SimulationScenario.JITTER, SimulationScenario.JUMP, SimulationScenario.RECOVERY)) {
             val filter = FixFilter()
             var rejected = 0; var islands = 0; var acceptedAfter = false
             for (i in 0..SimulatedRoute.LAST_INDEX) {

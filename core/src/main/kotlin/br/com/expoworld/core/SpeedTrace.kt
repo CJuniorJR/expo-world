@@ -3,9 +3,6 @@ package br.com.expoworld.core
 import kotlin.math.*
 
 object TraceConfig {
-    const val SAMPLE_INTERVAL_SECONDS = 5.0
-    const val SAMPLE_DISTANCE_METERS = 35.0
-    const val MAX_SAMPLES = 20_000
     const val STOP_SPEED_KMH = 3.0
     const val MIN_STOP_SECONDS = 5.0
     const val BRIGHT_SPEED_KMH = 60.0
@@ -13,13 +10,25 @@ object TraceConfig {
 
 data class TraceSample(
     val sequence: Int, val latitude: Double, val longitude: Double, val elapsedSeconds: Double,
-    val speedKmh: Double?, val breakBefore: Boolean, val stopId: Int, val stopSeconds: Double
+    val speedKmh: Double?, val breakBefore: Boolean, val stopId: Int, val stopSeconds: Double,
+    val accuracyMeters: Double? = null, val accepted: Boolean = true,
+    val rawSpeedMetersSecond: Double? = null, val monotonicSeconds: Double? = null,
+    val streetIds: String? = null
 )
 data class RecordedTrace(val startedAtMillis: Long, val endedAtMillis: Long, val samples: List<TraceSample>,
     val mode: String = "real", val completed: Boolean = true, val newAreaSquareMeters: Double? = null, val activity: ActivityKind = ActivityKind.CAR) {
     fun isInterrupted(active: Boolean) = !active && !completed && samples.isNotEmpty()
 }
 data class TraceStop(val latitude: Double, val longitude: Double, val durationSeconds: Double)
+
+/** Immutable prefix plus one head; avoids copying the full GPS history every frame. */
+internal class TracePrefix(private val source: List<TraceSample>, private val prefixSize: Int, private val head: TraceSample) : AbstractList<TraceSample>() {
+    override val size get() = prefixSize + 1
+    override fun get(index: Int): TraceSample {
+        if (index !in 0 until size) throw IndexOutOfBoundsException(index)
+        return if (index == prefixSize) head else source[index]
+    }
+}
 
 /** Frozen history changes only when another chunk fills; the recent tail is bounded. */
 data class TraceWindow(val history: List<TraceSample>, val recent: List<TraceSample>)
@@ -44,7 +53,6 @@ class TraceSampler(private val stopSpeedKmh: Double = TraceConfig.STOP_SPEED_KMH
     private var origin: Double? = null
     private var lastTime: Double? = null
     private var smoothSpeed: Double? = null
-    private var lastSample: TraceSample? = null
     private var latest: TraceSample? = null
     private var nextSequence = 0
     private var nextStopId = 0
@@ -52,15 +60,25 @@ class TraceSampler(private val stopSpeedKmh: Double = TraceConfig.STOP_SPEED_KMH
     private var stopStart: Double? = null
     private var pendingBreak = true
     fun breakContinuity() { pendingBreak = true }
-    fun accept(fix: Fix, continuous: Boolean): TraceSample? {
+    private fun elapsed(fix: Fix): Double {
+        if (origin == null && fix.monotonicSeconds.isFinite()) origin = fix.monotonicSeconds
+        // Preserve the original clock separately, even for late/out-of-order readings.
+        return origin?.let { fix.monotonicSeconds - it }?.takeIf { it.isFinite() }?.coerceAtLeast(latest?.elapsedSeconds ?: 0.0)
+            ?: (latest?.elapsedSeconds ?: 0.0)
+    }
+    fun reject(fix: Fix): TraceSample {
+        breakContinuity()
+        return TraceSample(nextSequence++, fix.latitude, fix.longitude, elapsed(fix), null, true, -1, 0.0,
+            fix.accuracy, false, fix.speedMetersPerSecond, fix.monotonicSeconds).also { latest = it }
+    }
+    fun accept(fix: Fix, continuous: Boolean, streetIds: String? = null): TraceSample {
         val isBreak = pendingBreak || !continuous
         if (isBreak) {
             window.clear(); smoothSpeed = null; lastTime = null; stopStart = null; stopId = -1
         }
         pendingBreak = false
         val time = fix.monotonicSeconds
-        if (origin == null) origin = time
-        val elapsed = time - origin!!
+        val elapsed = elapsed(fix)
         window.addLast(fix)
         while (window.size > 1 && time - window.first().monotonicSeconds > 6.0) window.removeFirst()
         val gpsSpeed = fix.speedMetersPerSecond?.takeIf { it.isFinite() && it in 0.0..ExplorationConfig.MAX_SPEED_METERS_SECOND }
@@ -77,21 +95,13 @@ class TraceSampler(private val stopSpeedKmh: Double = TraceConfig.STOP_SPEED_KMH
             if (stopStart == null) { stopStart = time; stopId = nextStopId++ }
         } else { stopStart = null; stopId = -1 }
         val stopSeconds = stopStart?.let { time - it } ?: 0.0
-        val old = lastSample
-        val oldFix = old?.let { Fix(it.latitude, it.longitude, fix.accuracy, time) }
-        val changedSpeed = old != null && ((old.speedKmh == null) != (smoothSpeed == null) ||
-            (old.speedKmh != null && smoothSpeed != null && abs(old.speedKmh - smoothSpeed!!) >= 8))
-        val newStop = stopSeconds >= TraceConfig.MIN_STOP_SECONDS && (old == null || old.stopId != stopId || old.stopSeconds < TraceConfig.MIN_STOP_SECONDS)
-        val departedStop = old != null && old.stopId >= 0 && stopId < 0
-        latest = TraceSample(nextSequence, fix.latitude, fix.longitude, elapsed, smoothSpeed, isBreak, stopId, stopSeconds)
-        if (old != null && !isBreak && !changedSpeed && !newStop && !departedStop &&
-            elapsed - old.elapsedSeconds < TraceConfig.SAMPLE_INTERVAL_SECONDS &&
-            (oldFix == null || Geo.distance(oldFix, fix) < TraceConfig.SAMPLE_DISTANCE_METERS)) return null
-        nextSequence++
-        return latest!!.also { lastSample = it }
+        // Persistence is chronological, never a display simplification or rolling buffer.
+        latest = TraceSample(nextSequence++, fix.latitude, fix.longitude, elapsed, smoothSpeed, isBreak, stopId, stopSeconds,
+            fix.accuracy, true, fix.speedMetersPerSecond, fix.monotonicSeconds, streetIds)
+        return latest!!
     }
-    fun finish(): TraceSample? = latest?.takeIf { it.elapsedSeconds > (lastSample?.elapsedSeconds ?: -1.0) }
-        ?.copy(sequence = nextSequence++)?.also { lastSample = it }
+    // Every received fix is already persisted; there is no sampled tail left to flush.
+    fun finish(): TraceSample? = null
     fun liveHead(): TraceSample? = latest
 }
 
@@ -101,7 +111,10 @@ object TracePresentation {
         if (head == null) return samples
         val last = samples.lastOrNull() ?: return listOf(head)
         if (head.sequence < last.sequence || head.elapsedSeconds <= last.elapsedSeconds) return samples
-        return if (head.sequence == last.sequence) samples.dropLast(1) + head else samples + head
+        // Room and location StateFlows can arrive at different times. Wait for the
+        // missing chronological points rather than drawing a shortcut over them.
+        if (head.sequence > last.sequence + 1) return samples
+        return TracePrefix(samples, if (head.sequence == last.sequence) samples.size - 1 else samples.size, head)
     }
     fun color(speedKmh: Double?, brightSpeedKmh: Double = TraceConfig.BRIGHT_SPEED_KMH, stopSpeedKmh: Double = TraceConfig.STOP_SPEED_KMH, theme: ExplorerTheme = ExplorerTheme.GREEN): String {
         if (speedKmh == null || !speedKmh.isFinite()) return UNKNOWN_COLOR
@@ -111,7 +124,7 @@ object TracePresentation {
         return "#%02X%02X%02X".format(java.util.Locale.ROOT, channel((theme.traceDark shr 16) and 255, (theme.traceLight shr 16) and 255),
             channel((theme.traceDark shr 8) and 255, (theme.traceLight shr 8) and 255), channel(theme.traceDark and 255, theme.traceLight and 255))
     }
-    fun stops(samples: List<TraceSample>): List<TraceStop> = samples.filter { it.stopId >= 0 }
+    fun stops(samples: List<TraceSample>): List<TraceStop> = samples.filter { it.accepted && it.stopId >= 0 }
         .groupBy { it.stopId }.values.mapNotNull { group ->
             val duration = group.maxOf { it.stopSeconds }
             if (duration < TraceConfig.MIN_STOP_SECONDS) null else TraceStop(group.first().latitude, group.first().longitude, duration)
@@ -123,14 +136,14 @@ object TracePresentation {
         var lastMovingSegment: Int? = null
         for (i in 1 until samples.size) {
             val a = samples[i - 1]; val b = samples[i]
-            if (b.breakBefore) { lastMovingSegment = null; continue }
+            if (!a.accepted || !b.accepted || b.breakBefore) { lastMovingSegment = null; continue }
             if (a.latitude != b.latitude || a.longitude != b.longitude) lastMovingSegment = i
             if (b.speedKmh?.let { it <= activity.stopKmh } == true) {
                 lastMovingSegment?.let { stoppedApproaches.add(it) }
             }
         }
         val features = samples.zipWithNext().mapIndexedNotNull { index, (a, b) ->
-            if (b.breakBefore || (a.latitude == b.latitude && a.longitude == b.longitude)) null
+            if (!a.accepted || !b.accepted || b.breakBefore || (a.latitude == b.latitude && a.longitude == b.longitude)) null
             else """{"type":"Feature","properties":{"color":"${if (index + 1 in stoppedApproaches) "#000000" else color(b.speedKmh, activity.brightKmh, activity.stopKmh, theme)}"},"geometry":{"type":"LineString","coordinates":[[${a.longitude},${a.latitude}],[${b.longitude},${b.latitude}]]}}"""
         }
         return features.joinToString(",", "{\"type\":\"FeatureCollection\",\"features\":[", "]}")

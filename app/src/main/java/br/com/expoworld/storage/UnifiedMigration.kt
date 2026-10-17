@@ -33,5 +33,14 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
         db.execSQL("CREATE TABLE IF NOT EXISTS planned_routes (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, createdAtMillis INTEGER NOT NULL, payload TEXT NOT NULL)")
     }
 }
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE route_samples ADD COLUMN accuracyMeters REAL DEFAULT NULL")
+        db.execSQL("ALTER TABLE route_samples ADD COLUMN accepted INTEGER NOT NULL DEFAULT 1")
+        db.execSQL("ALTER TABLE route_samples ADD COLUMN rawSpeedMetersSecond REAL DEFAULT NULL")
+        db.execSQL("ALTER TABLE route_samples ADD COLUMN monotonicSeconds REAL DEFAULT NULL")
+        db.execSQL("ALTER TABLE route_samples ADD COLUMN streetIds TEXT DEFAULT NULL")
+    }
+}
 val ALL_MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3,
-    unifiedMigration(3), unifiedMigration(4), unifiedMigration(5), unifiedMigration(6), MIGRATION_7_8)
+    unifiedMigration(3), unifiedMigration(4), unifiedMigration(5), unifiedMigration(6), MIGRATION_7_8, MIGRATION_8_9)

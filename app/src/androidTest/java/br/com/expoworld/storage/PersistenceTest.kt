@@ -13,6 +13,38 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PersistenceTest {
+    @Test fun repeatedPassagesAndRejectedFixSurviveReopenAndSavingWithoutVisualEdits() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "chronological-history-test.db"
+        context.deleteDatabase(name)
+        fun open() = Room.databaseBuilder(context, ExplorationDatabase::class.java, name).addMigrations(*ALL_MIGRATIONS).build()
+        var db = open()
+        try {
+            var repo = ExplorationRepository(db.cells())
+            val history = (0..40).map { i ->
+                TraceSample(i, -25.43, -49.27 + (if (i <= 20) i else 40 - i) * .00001,
+                    i.toDouble(), 20.0, i == 0 || i == 26, -1, 0.0, if (i == 25) 80.0 else 5.0,
+                    i != 25, 5.55, 1000.0 + i, "curitiba:road-A")
+            }
+            history.forEach { sample -> repo.saveAccepted("real", emptySet(), sample, 1000L.takeIf { sample.sequence == 0 }) }
+            repo.finishRoute("real", null)
+            val engine = TraceRenderTimeline()
+            engine.frame(history)
+            engine.frame(ReplayTimeline.frame(history, .4f))
+            assertEquals(history, repo.route("real").first()!!.samples)
+            repo.saveRealRoute("Todas as passagens", 1000L)
+            val saved = repo.savedRoutes().first().single()
+            db.close(); db = open(); repo = ExplorationRepository(db.cells())
+            assertEquals(history, repo.route("real").first()!!.samples)
+            assertEquals(history, repo.route(saved.id).first()!!.samples)
+            assertEquals(history, ReplayTimeline.frame(repo.route(saved.id).first()!!.samples, 1f))
+            try {
+                repo.saveAccepted("real", emptySet(), history.first().copy(longitude = 0.0))
+                fail("Historical points must never be overwritten by sequence")
+            } catch (_: android.database.sqlite.SQLiteConstraintException) { }
+            assertEquals(history, repo.route("real").first()!!.samples)
+        } finally { db.close(); context.deleteDatabase(name) }
+    }
     @Test fun firstDiscoveryDateAndReplayTimingSurviveRevisitAndNewTrip() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val db = Room.inMemoryDatabaseBuilder(context, ExplorationDatabase::class.java).build()
@@ -140,7 +172,7 @@ class PersistenceTest {
             assertNotNull(repo.completedRoute("real").first())
         } finally { upgraded.close(); context.deleteDatabase(name) }
     }
-    @Test fun boundedTraceRetainsExplorationAndKeepsModesSeparate() = runBlocking {
+    @Test fun chronologicalTraceNeverTrimsAndKeepsModesSeparate() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val db = Room.inMemoryDatabaseBuilder(context, ExplorationDatabase::class.java).build()
         try {
@@ -151,8 +183,8 @@ class PersistenceTest {
             repo.beginRoute("simulation")
             repo.saveAccepted("real", setOf(Cell(0, 0)), sample)
             repo.saveAccepted("simulation", emptySet(), sample)
-            repo.saveAccepted("real", emptySet(), sample.copy(sequence = TraceConfig.MAX_SAMPLES + 1, elapsedSeconds = 100.0))
-            assertEquals(1, dao.samples("real").size)
+            repo.saveAccepted("real", emptySet(), sample.copy(sequence = 20_001, elapsedSeconds = 100.0))
+            assertEquals(2, dao.samples("real").size)
             assertEquals(1, dao.samples("simulation").size)
             assertEquals(setOf(Cell(0, 0)), repo.visible("real", CellBounds(-1, 1, -1, 1)).toSet())
         } finally { db.close() }
