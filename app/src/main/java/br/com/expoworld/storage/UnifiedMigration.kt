@@ -42,5 +42,17 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
         db.execSQL("ALTER TABLE route_samples ADD COLUMN streetIds TEXT DEFAULT NULL")
     }
 }
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE route_sessions ADD COLUMN archivedId TEXT DEFAULT NULL")
+        db.execSQL("ALTER TABLE route_sessions ADD COLUMN newStreetMeters REAL DEFAULT NULL")
+        db.execSQL("ALTER TABLE saved_routes ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE saved_routes ADD COLUMN expeditionId TEXT DEFAULT NULL")
+        db.execSQL("ALTER TABLE saved_routes ADD COLUMN distanceMeters REAL DEFAULT NULL")
+        db.execSQL("ALTER TABLE saved_routes ADD COLUMN recordedSeconds REAL DEFAULT NULL")
+        db.execSQL("CREATE TABLE IF NOT EXISTS expeditions (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, createdAtMillis INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS trip_street_visits (mode TEXT NOT NULL, dataset TEXT NOT NULL, streetId TEXT NOT NULL, bin INTEGER NOT NULL, neighborhoodId TEXT NOT NULL, meters REAL NOT NULL, PRIMARY KEY(mode, dataset, streetId, bin))")
+    }
+}
 val ALL_MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3,
-    unifiedMigration(3), unifiedMigration(4), unifiedMigration(5), unifiedMigration(6), MIGRATION_7_8, MIGRATION_8_9)
+    unifiedMigration(3), unifiedMigration(4), unifiedMigration(5), unifiedMigration(6), MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
