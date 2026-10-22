@@ -1,3 +1,45 @@
+# Validação — 22/10/2026 — 0.7.0 — Navegação, viagens, planejamento e mídia
+
+## Entrega
+
+- Incorporado por fast-forward o ajuste remoto `d9bf517` de histórico GPS integral e consolidação do rastro, preservando a versão 0.6.2 feita em casa. Etapa de persistência/backup enviada à main em `3431057`; integração final registrada no commit deste relatório.
+- Barra Mapa/Bairros/Roteiros/Histórico, ajustes na engrenagem, atividade no mapa, bairro atual/percentual, páginas individuais, miniaturas ilustrativas, fontes ampliadas, ações diretas de GPS, resumo final com nomear/compartilhar e prévia animada. Pausar/Continuar e confirmação de encerramento preservados. Tema original e dados mantidos.
+- Histórico real automático/idempotente, recuperação antes da substituição de sessão, renomear/favoritar/excluir, expedições e mapa/resumo agregado. Excluir viagem preserva exploração e não a recria ao reabrir.
+- Planejar→Prévia→Meus roteiros; destino por toque e 0–60 min extras sobre rota direta, bairro-alvo com pelo menos 50% da distância estimada dentro dele, início do roteiro pelo mapa, estimativa de ruas novas e pontos percentuais. Nenhuma criação/visualização/salvamento concede exploração.
+- Ruas novas por viagem/bairro registradas atomicamente e deduplicadas entre atividades. Geometria reconhecida, não reconhecida e leituras ruins são diagnósticos estimados separados de crédito novo; dados antigos continuam desconhecidos.
+- Preparação offline de geometria/orientações e implementação de download MapLibre com limites/progresso/cancelamento/exclusão. **Mapa offline desativado por padrão**, pois MapTiler exige plano/acordo autorizando pré-download. Não foi realizado download de regiões do usuário. `OFFLINE_MAPS_ALLOWED=true` só para configuração autorizada. Máximo cinco pacotes, 100 km², zoom 10–16, 4.000 tiles estimados, interrupção acima de 6.000 tiles ou 50 MB. Roteamento novo continua online.
+- MP4 AVC silencioso 720×960/24 fps/12 s, tema e marcador orientado, mapa e rastro consolidado; revelação cronológica quando há até 20 mil células novas com tempo. PNG/GIF preservados. Exportação seleciona a viagem correta, oferece progresso/cancelamento e libera codec/muxer/bitmaps/temporários; saídas novas incompletas são removidas.
+- Banco **9→10**, backup **3** completo com prévia/checksum/validação integral/transação e mescla; formatos 1/2 continuam aceitos. Células/datas, créditos, histórico GPS, favoritos, expedições, planejados e preferências saneadas incluídos. Tiles, chaves, caches e simulação excluídos. Limites 128 MB/5 milhões de células/1 milhão de GPS/10 mil viagens/roteiros/5 mil expedições. Metadados opcionais não finitos viram desconhecidos, preservando rejeição de GPS inválido.
+- Operações de arquivo em ViewModel, sem perder o job na rotação; bloqueio de envio duplicado e cancelamento do job real. A prévia animada usa worker único com timeline reutilizada. Backup também trata extremos de névoa 20%/80% e preferência inválida.
+
+## Verificações executadas
+
+- **103 testes JVM aprovados**, zero falhas/erros/ignorados. Incluem regressões da main remota e oito testes novos de limites de destino/offline, vídeo (cronologia, marcador, conversão YUV) e qualidade de registro (lacunas/rejeitados/metadados antigos).
+- Gradle `:core:test :app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest` passou; após os últimos ajustes apenas no app, `:app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest` passou novamente. Parâmetros finais: `-Pkotlin.incremental=false -Pkotlin.compiler.execution.strategy=in-process --no-daemon`. Houve tentativa inicial com caches inconsistentes após builds concorrentes, resolvida limpando somente app/build e core/build; nenhuma falha de teste persistiu.
+- Lint: **0 erros, 49 avisos**. Avisos incluem APIs legadas, sugestões KTX, dependências e nomenclatura de callbacks. Não foram atualizadas bibliotecas.
+- **23 testes Android compilados, não executados**, pois ADB não lista dispositivo. Dez novos cobrem histórico/backup completo/legado/corrupção/80% de névoa, codec de planejamento, encoder/cancelamento de vídeo e exclusão de trabalho duplicado/cancelamento em operações de arquivo.
+- `scripts/check_migration_sql.py`: onze variantes históricas 1–9 e home4/5→10 aprovadas, preservando tabelas/índices/defaults/dados. SQL real do DAO lê e arquiva 40.002 pontos com metadados; consulta de novidade entre atividades usa índice primário. Verificação SQLite no computador, sem substituir Room no Android.
+- `scripts/check_curitiba_data.py`: 75 bairros/43.655 partes e estimativas por modalidade/união preservadas. `scripts/check_apk_assets.py`: nomes e bytes dos assets reais conferidos dentro do APK final. Nenhuma mudança na identidade da base.
+- `git diff --check`, leitura UTF-8 e inspeção de credenciais aprovados. Configurações locais, ferramentas e APK ignorados. Assinatura APK verificada por apksigner (código 0); aapt confirma br.com.expoworld/0.7.0/versionCode18/API23–36.
+
+APK: `dist/expo-world-0.7.0-debug.apk`, **65425138 bytes**. SHA-256: `3C5E8D387D639EA73C6C3EBE0F57DB26E24D38267D681133A0BD6720D3772785`.
+
+## Pendente no aparelho
+
+Sem instalação, captura visual Android, teste GPS real ou execução do MediaCodec/Room nesta rodada. Conferir ao atualizar sem desinstalar:
+
+1. Dados existentes e início/pausa/finalização; viagem concluída/interrompida guardada uma vez, renomear sem duplicar e excluir sem reaparecer.
+2. Barra inferior, textos com fonte ampliada/tela pequena, bairro atual e ações diretas de GPS. Histórico e trajeto selecionado preservados ao girar.
+3. Planejamento livre/destino/bairro; orçamento extra zero e positivo, falha de rede, escolha no mapa, voltar à prévia, início perto da partida e retorno original.
+4. Favoritos, busca, criar/atribuir expedição, mapa de múltiplos trajetos e soma de distância/tempo. Preview de miniatura não é mapa-base.
+5. Backup completo, cancelar prévia, cancelar restauração, girar durante operação, importar duas vezes, importar legado/corrompido e conferir créditos/histórico/tema/névoa em outro aparelho. Confirmar opacidade80% exportável. Arquivo não criptografado.
+6. Preparar e reabrir roteiro sem rede; confirmar aviso de mapa indisponível nesta configuração. Com contrato autorizado: baixar/cancelar/apagar região e conferir status de conclusão/limites. Tiles não acompanham backup.
+7. Exportar PNG/GIF/MP4 da viagem selecionada, incluindo trajeto antigo; cancelar, girar, conferir mapa/atribuição/cores/marcador e revelar apenas células com tempo conhecido. Conferir mensagem quando encoder não for compatível.
+
+Estimativas dependem de GPS, base e serviço de roteamento. Não há garantia de condições atuais das vias, trânsito em tempo real, navegação por voz ou recálculo automático. Não houve envio novo de GPS/histórico nesta validação; somente código por ação explícita no aparelho usa o roteador previamente autorizado.
+
+---
+
 # Validação — 16/10/2026 — 0.6.1 — Interface e GIF
 
 - Menu dividido em Explorar, Bairros, Trajetos e Ajustes. Seletores fixos e conteúdo rolável independente; acesso direto a Planejar volta e Bairros no mapa. Replay, resumo, cartão e trajetos salvos aparecem antes dos detalhes expansíveis de velocidade.

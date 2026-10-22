@@ -1,6 +1,6 @@
 # Expo World — MVP Android
 
-Aplicativo nativo em Kotlin/Jetpack Compose que revela uma faixa ao redor do caminho percorrido. MapLibre Native exibe o mapa; Room preserva a exploração e o rastro por velocidade do último percurso. Interface em português do Brasil. Sem login, backend próprio, sincronização ou anúncios. Planejamento online de roteiros com orientações em texto, sem navegação por voz. Trajetos reais podem ser salvos localmente com título e consultados depois.
+Aplicativo nativo em Kotlin/Jetpack Compose que revela uma faixa ao redor do caminho percorrido. MapLibre Native exibe o mapa; Room preserva a exploração e o rastro por velocidade do último percurso. Interface em português do Brasil. Sem login, backend próprio, sincronização ou anúncios. Planejamento online de roteiros com orientações em texto, sem navegação por voz. Trajetos reais são guardados automaticamente no histórico e podem ser nomeados, favoritados e agrupados em expedições.
 
 ## Rastro consolidado e histórico completo — 0.6.2
 
@@ -12,7 +12,57 @@ Replay, prévia, PNG e GIF partem do histórico cronológico completo; retornos 
 
 Para testar sem dirigir: **Menu → Ajustes → Trajeto simulado → Ida e volta • rastro consolidado**. Inicie a simulação, acompanhe a volta, encerre e abra o replay em **Trajetos**. É uma demonstração gráfica em Curitiba, sem indicação de trânsito permitido nas vias. Confira também pausa/retomada e arraste o replay para frente e para trás. [Estratégia, tolerâncias e matriz de validação](docs/trace-consolidation.md).
 
-## Interface e GIF — 0.6.1
+## Navegação, histórico e exploração — 0.7.0 — 22/10/2026
+
+A entrega incorpora primeiro a atualização remota `d9bf517` (0.6.2): histórico GPS integral, metadados originais e consolidação visual de rastros continuam preservados. Banco **9→10**, sem reset. Tema verdinho e Palio continuam como padrão; as modalidades compartilham as mesmas descobertas, com simulação separada.
+
+### Encontrar as coisas
+
+A barra inferior abre **Mapa · Bairros · Roteiros · Histórico**; a engrenagem abre **Ajustes**. No mapa, escolha A pé/Bicicleta/Carro antes de começar. O cartão do bairro atual mostra o percentual e abre a lista de bairros. Fontes secundárias foram ampliadas. Problemas de localização levam às opções de GPS/permissão e o mapa oferece recarregar. Durante o percurso, Pausar/Continuar é a ação principal e Encerrar permanece separado, com confirmação. A escolha do trajeto e as operações de arquivo resistem à rotação da tela.
+
+**Roteiros** separa Planejar, Prévia e Meus roteiros. Configure primeiro e confira a duração/distância/descoberta antes de começar. **Ver no mapa** fecha o painel para mostrar a linha tracejada; **Começar roteiro** no mapa inicia a atividade planejada com GPS recente a até 150 m da partida. Exploração livre continua disponível. Salvar, abrir, preparar offline ou visualizar nunca concede créditos de ruas.
+
+### Explorar a caminho e por bairro
+
+Em Planejar, selecione **Ir a um destino**, escolha o destino no mapa e informe de **0 a 60 minutos extras**. Calculamos primeiro a rota direta pelo perfil selecionado e comparamos até três desvios: o limite é o tempo direto estimado mais o adicional informado, sem a tolerância de 10% aplicada aos passeios livres. Zero adicional usa somente a opção direta. Prévia mostra tempo direto, tempo da opção e adicional estimado. A estimativa não usa trânsito em tempo real e pode variar durante a viagem.
+
+Na lista de bairros, **Explorar este bairro** abre o planejamento com o alvo selecionado. Também é possível escolher um dos 75 bairros no formulário. Pontos candidatos ficam em vias elegíveis do bairro; a opção só é aceita se pelo menos 50% de sua distância estimada estiver dentro dele (amostragem geográfica de aproximadamente 40 m). Distância de acesso pode inviabilizar a duração escolhida. A prévia apresenta até quantos quilômetros novos e pontos percentuais poderiam ser acrescentados, usando os créditos atuais e a mesma união de vias do progresso. É estimativa, não crédito antecipado nem garantia de reconhecimento pelo GPS. Continua possível usar Explorar/Passear sem bairro ou destino.
+
+As novas consultas utilizam o mesmo Valhalla/FOSSGIS já autorizado: apenas partida/destino/pontos sugeridos, por ação explícita, no máximo quatro consultas sequenciais por geração, sem enviar histórico, névoa ou créditos. As condições de debug/release descritas abaixo permanecem.
+
+### Histórico e expedições
+
+Cada percurso real é guardado automaticamente ao terminar; registros interrompidos são arquivados ao reabrir ou antes de substituir o slot atual. O título sugerido usa data/hora e pode ser alterado. Arquivar/salvar novamente é idempotente. Excluir um trajeto não o recria ao reabrir e não apaga descobertas. Salvar manualmente com título agora renomeia o arquivo automático.
+
+No **Histórico**, use busca, favoritos e filtros de expedição. Cartões têm prévia ilustrativa do traçado (sem mapa-base), data, atividade e distância/duração quando disponíveis. A página de cada viagem identifica claramente o percurso selecionado e reúne mapa real, qualidade do registro, replay, antes/depois, renomear, favoritar, excluir e compartilhar. **Criar expedição** agrupa várias viagens; atribua-as na página do trajeto. O mapa da expedição mostra os percursos juntos e o resumo soma distância/tempo registrados, incluindo repetições. A exploração geral continua deduplicada. Prévia conjunta limitada a 50 mil segmentos; os históricos originais não são cortados.
+
+O resumo final oferece nomear, ver as descobertas e compartilhar. Mostra **ruas novas reconhecidas nesta viagem** e bairros que avançaram. Esses créditos são persistidos na mesma transação das descobertas, sem duplicar um bin de rua já reconhecido em outra modalidade. Viagens anteriores à 0.7.0 mostram novidade de ruas indisponível, pois não reconstruímos quando o crédito antigo foi ganho. A qualidade separa geometria com/sem correspondência e leituras rejeitadas/imprecisas; isso é diagnóstico estimado, inclui repetições e não concede créditos. Vias ausentes/fora da base também podem explicar falta de correspondência; não se atribui toda diferença a GPS ruim.
+
+### Preparar um passeio offline
+
+Em Prévia, **Preparar para usar offline** guarda roteiro e orientações; os pacotes podem ser abertos ou excluídos na biblioteca, e a geometria também entra nos roteiros do backup completo. Gerar uma opção nova ou recalcular retorno continua precisando de internet.
+
+**Download do mapa vem desativado nesta configuração MapTiler.** As condições atuais permitem cache normal, mas exigem plano Custom/acordo escrito para pré-download de regiões ([termos §6.3](https://www.maptiler.com/terms/cloud/), [documentação de mapas offline](https://docs.maptiler.com/guides/using-map/atak-maps/), conferidos em 22/10/2026). Para um provedor/plano autorizado, configure `OFFLINE_MAPS_ALLOWED=true` em `local.properties`. Essa opção não concede direitos no provedor: só habilita a implementação MapLibre.
+
+Com autorização configurada: até cinco pacotes, região do percurso até 100 km², zoom 10–16, até 4.000 tiles estimados; interrompe acima de 6.000 tiles reais ou 50 MB por mapa. A interface informa progresso, bytes, cancelamento e exclusão, e só declara mapa pronto após confirmação completa pelo SDK. Pacote interrompido nunca é anunciado como mapa offline. Tiles não são exportados no backup e precisam ser baixados novamente no outro aparelho. Não houve download de mapas do usuário no computador.
+
+### Imagem, animação e vídeo
+
+Na página do trajeto, **Compartilhar imagem, GIF ou vídeo** abre a prévia com título e opção de animar antes de salvar. PNG 1080×1440 e GIF 720×960/100 quadros continuam disponíveis. **MP4** acrescenta vídeo AVC silencioso de 720×960, 24 fps, 12 s (2 s finais de leitura), mapa e rastro consolidado, Palio/pessoa/bicicleta no tema e direção do deslocamento. Quando existem tempos de descoberta e até 20 mil células novas, o vídeo revela essas células na ordem real; registros antigos/maiores mostram mapa e rastro, sem inventar a revelação histórica. São cartões, não captura da tela ou navegação por voz.
+
+As três exportações têm progresso e cancelamento, usam buffers limitados e processamento fora da interface. Arquivos temporários/saídas incompletas são removidos em falha ou cancelamento. O mapa mantém sua atribuição; snapshot precisa de tiles disponíveis e o MP4 depende de um encoder AVC no aparelho. O arquivo usa o trajeto selecionado, inclusive histórico. Não há upload automático.
+
+### Backup completo e troca de aparelho
+
+**Ajustes → Backup completo** exporta formato 3: células/datas, créditos de ruas/bairros reais, histórico GPS e seus metadados, células/novidade por viagem, favoritos, expedições, roteiros planejados e preferências saneadas (tema, intensidade da névoa e título do cartão). Chaves, URLs privadas, caches, tiles e simulação ficam fora. Roteiros preparados offline são incluídos como roteiros planejados; o mapa precisa de novo download.
+
+Restaurar primeiro cria uma cópia privada imutável e verifica checksum, valores, ordem e vínculos. A prévia mostra as quantidades antes de **Restaurar e mesclar**. Tudo é aplicado numa transação e mantém dados existentes; IDs já presentes não sobrescrevem o histórico local. Arquivos 1/2 de células continuam aceitos. Limites: 128 MB, cinco milhões de células, um milhão de leituras GPS, dez mil viagens/roteiros e cinco mil expedições. Se o acervo exceder esses limites, a exportação informa falha, sem produzir um backup alegadamente completo. O checksum detecta corrupção, não criptografa o arquivo. Metadados GPS opcionais não finitos viram desconhecidos no backup; leituras rejeitadas continuam rejeitadas. O arquivo contém lugares visitados e fica no destino escolhido.
+
+### Validação desta entrega
+
+Ver `VALIDATION.md`. Instalar como atualização, sem desinstalar. Sem dispositivo ADB disponível nesta sessão: interface, importação real, downloads autorizados e encoder MP4 ainda requerem teste no aparelho. Não há alteração de exploração por velocidade nem ranking competitivo.
+
+## Histórico da interface e GIF — 0.6.1
 
 O menu tem quatro áreas, com os atalhos sempre visíveis e o conteúdo de cada área rolando separadamente:
 
@@ -45,7 +95,7 @@ Sem chave/URL de estilo, há um fundo neutro com orientação clara. Ele permite
 python scripts/check_migration_sql.py
 ```
 
-O APK, quando compilado, fica em `app/build/outputs/apk/debug/app-debug.apk`. A entrega atual também está em `dist/expo-world-0.6.1-debug.apk`. O teste conectado exige um Android conectado por ADB ou emulador iniciado. A verificação Python usa a biblioteca padrão para testar o SQL das migrações em SQLite do computador, sem substituir o teste Room no Android. Relatórios: `core/build/reports/tests/test/index.html` e `app/build/reports/lint-results-debug.html`.
+O APK, quando compilado, fica em `app/build/outputs/apk/debug/app-debug.apk`. A entrega atual também está em `dist/expo-world-0.7.0-debug.apk`. O teste conectado exige um Android conectado por ADB ou emulador iniciado. A verificação Python usa a biblioteca padrão para testar o SQL das migrações em SQLite do computador, sem substituir o teste Room no Android. Relatórios: `core/build/reports/tests/test/index.html` e `app/build/reports/lint-results-debug.html`.
 
 `scripts/bootstrap-build.ps1` pode baixar JDK 17 em `.tools` e executar a compilação, sem alterar a instalação de Java do sistema. `-InstallAndroidSdk` também instala ferramentas Android locais e apresenta as licenças do SDK para revisão/aceitação. O script precisa de acesso à internet; downloads e caches não são versionados. Se já tiver SDK instalado, defina `ANDROID_HOME` ou `sdk.dir`. A primeira execução baixa o Gradle e as dependências.
 
@@ -77,7 +127,7 @@ O usuário autorizou nesta sessão o envio da partida e dos pontos intermediári
 
 Para **release/distribuição**, configure `ROUTING_URL` em `local.properties` para uma instância Valhalla própria ou serviço autorizado (base HTTPS, sem `/route`). Release sem configuração bloqueia o planejamento. O servidor público é uma demonstração de uso justo, não infraestrutura irrestrita de produção; seus mantenedores pedem contato antes de publicar aplicativos que o utilizem. [Condições do demo e identificação](https://github.com/valhalla/valhalla#demo-server), [perfis, opções, instruções e formato da API](https://valhalla.github.io/valhalla/api/route/api-reference/). Regras conferidas em 16/10/2026. Não foi enviado pedido aos mantenedores ou publicado aplicativo nesse serviço.
 
-Verificação manual: gere uma caminhada com retorno e uma sem retorno; escolha partida no mapa; compare Explorar/Passear; salve/reabra um roteiro; inicie perto da partida; confira orientações e recálculo para a origem; interrompa a internet e confirme que roteiro anterior e gravação GPS permanecem; atualize sem desinstalar e confira os dados anteriores. O backup de células continua sem incluir roteiros planejados.
+Verificação manual: gere uma caminhada com retorno e uma sem retorno; escolha partida no mapa; compare Explorar/Passear; salve/reabra um roteiro; inicie perto da partida; confira orientações e recálculo para a origem; interrompa a internet e confirme que roteiro anterior e gravação GPS permanecem; atualize sem desinstalar e confira os dados anteriores. O backup completo formato 3 inclui os roteiros planejados; arquivos antigos 1/2 continuam limitados a células.
 
 ## Temas
 
@@ -150,7 +200,7 @@ O seletor Android escolhe o destino, sem nova permissão de armazenamento ou upl
 
 Menu → Mapa das primeiras vezes. No detalhe, dourado indica as células novas do último percurso; verde, as primeiras descobertas do mês atual; azul, descobertas anteriores ao mês; cinza, data desconhecida. O último percurso tem prioridade de cor. O mês usa o calendário/fuso do aparelho. Datas futuras ou ausentes são tratadas como desconhecidas na visualização. Repassar por um lugar não muda sua primeira data.
 
-O banco unificado **7** recebe migrações das versões 1 a 6. As branches anteriores tinham estruturas diferentes para os mesmos números 4 e 5; a migração verifica as colunas existentes antes de acrescentar o que falta, preservando células, rastros, títulos e créditos. Datas/tempos antigos continuam desconhecidos. Não se inventa quando uma área antiga foi visitada. O backup agora usa formato **2**, com a primeira data por célula; a restauração também aceita formato 1, cujas datas ficam desconhecidas. Duplicatas preservam a data já existente. Limites de 128 MB e 5 milhões de células valem simultaneamente na exportação e restauração. O backup continua sem rastro, tempo relativo do último percurso ou preferências.
+O banco unificado **7** recebe migrações das versões 1 a 6. As branches anteriores tinham estruturas diferentes para os mesmos números 4 e 5; a migração verifica as colunas existentes antes de acrescentar o que falta, preservando células, rastros, títulos e créditos. Datas/tempos antigos continuam desconhecidos. Não se inventa quando uma área antiga foi visitada. Na 0.5.0 o backup usava formato **2** de células/datas. A 0.7.0 exporta formato **3 completo**, descrito no início deste README, e continua importando os formatos 1/2.
 
 ### Simulação com curvas em Curitiba
 
@@ -201,7 +251,7 @@ Inicie um **novo** percurso: a linha aparece **ao vivo**, assim que chegar uma l
 
 Não há círculos de parada. O rastro fica preto nos trechos parados; quando as coordenadas não mudam, o último segmento de chegada fica preto, sem criar geometria artificial nem unir lacunas. Grupos de leituras a até o limiar da atividade durante pelo menos 5 segundos continuam entrando no resumo. No menu, **Rastro por velocidade** exibe a legenda, número de paradas e duração aproximada acumulada. **Exibir percurso** permite esconder a linha; **Enquadrar percurso** volta à visão do rastro. Velocidade baixa pode representar trânsito, semáforo ou outro motivo: não consultamos dados de trânsito nem inferimos sua causa.
 
-O último percurso encerrado fica salvo no aparelho e reaparece ao reabrir. No modo real, começar outro substitui o último rastro quando a primeira leitura é gravada, mesmo que rejeitada e retida somente para auditoria; iniciar/encerrar sem receber leituras preserva o resultado anterior. A troca e a primeira gravação são atômicas. A exploração acumulada é preservada em todos os casos. Real e simulado continuam separados. No menu, **Salvar trajeto com título** guarda uma cópia independente do último percurso real concluído. Informe um título de 1 a 80 caracteres; a seção **Trajetos salvos** permite selecionar e enquadrar essas cópias no mapa, com resumo e cores. **Voltar ao último percurso** retorna ao registro mais recente. Salve antes de iniciar outro percurso; simulações e viagens em andamento não podem ser salvas. Os trajetos nomeados sobrevivem à substituição do último percurso, reinício do app e limpeza da simulação. Percursos anteriores à versão 0.1.3 não têm dados de velocidade e não podem receber o rastro retroativamente.
+O último percurso encerrado fica salvo no aparelho e reaparece ao reabrir. No modo real, começar outro substitui o último rastro quando a primeira leitura é gravada, mesmo que rejeitada e retida somente para auditoria; iniciar/encerrar sem receber leituras preserva o resultado anterior. A troca e a primeira gravação são atômicas. A exploração acumulada é preservada em todos os casos. Real e simulado continuam separados. No menu, **Salvar trajeto com título** guarda uma cópia independente do último percurso real concluído. Informe um título de 1 a 80 caracteres; a seção **Trajetos salvos** permite selecionar e enquadrar essas cópias no mapa, com resumo e cores. **Voltar ao último percurso** retorna ao registro mais recente. Na 0.7.0 o arquivamento é automático; dar um título renomeia a cópia do histórico. Simulação permanece separada. Os trajetos nomeados sobrevivem à substituição do último percurso, reinício do app e limpeza da simulação. Percursos anteriores à versão 0.1.3 não têm dados de velocidade e não podem receber o rastro retroativamente.
 
 A velocidade nativa do GPS é preferida, desde que presente, plausível e com incerteza de velocidade até 3 m/s quando o Android a fornece. Sem ela, estimamos deslocamento em metros numa janela de 4–6 segundos somente quando a precisão posicional é de até 10 m. Caso contrário a velocidade fica desconhecida. A suavização exponencial de 3 segundos reduz oscilações, mas introduz um pequeno atraso ao desacelerar; tempos de parada são estimativas, não medições exatas.
 
@@ -251,7 +301,7 @@ A interface mantém `© MapTiler • © OpenStreetMap contributors`, além do co
 
 Chaves de tiles distribuídas num APK são recuperáveis; `local.properties` evita incluí-las no código-fonte, mas não as transforma em segredo no cliente. Use chave dedicada, acompanhe consumo e aplique as restrições disponíveis para sua integração conforme [documentação de chaves MapTiler](https://docs.maptiler.com/guides/credentials/api-key/). Não fornecemos chave compartilhada.
 
-Internet é necessária para obter tiles/estilo ainda não carregados. Cache eventual do SDK não constitui suporte a mapas offline completos. Nenhuma operação de GPS ou persistência depende do provedor ou da internet; mapas não carregados podem ficar sem ruas, enquanto a exploração continua sendo salva localmente.
+Internet é necessária para obter tiles/estilo ainda não carregados. Cache eventual do SDK não equivale a pacote offline verificado. Veja a preparação de passeios na seção 0.7.0; downloads dependem de um provedor/plano autorizado. Nenhuma operação de GPS ou persistência depende do provedor ou da internet; mapas não carregados podem ficar sem ruas, enquanto a exploração continua sendo salva localmente.
 
 ## Fluxo de alterações no GitHub
 

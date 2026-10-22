@@ -71,7 +71,7 @@ class BackupManager internal constructor(private val context: android.content.Co
                         }
                     }
                     val prefs = JSONArray().put(currentTheme().key)
-                        .put(context.getSharedPreferences("map", 0).getFloat("fogOpacity", .55f).coerceIn(.2f, .8f).toDouble())
+                        .put(context.getSharedPreferences("map", 0).getFloat("fogOpacity", .55f).toDouble().takeIf { it.isFinite() }?.coerceIn(.2, .8) ?: .55)
                         .put(context.getSharedPreferences("map", 0).getString("cardTitle", "Minha expedição")?.take(40) ?: "Minha expedição")
                     encoder.row("preferences", prefs)
                     encoder.finish()

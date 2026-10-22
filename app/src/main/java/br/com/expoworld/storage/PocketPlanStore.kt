@@ -13,6 +13,9 @@ object PocketPlanCodec {
     fun encode(plan: PocketPlan): String = JSONObject().apply {
         put("version",1);put("id",plan.id);put("activity",plan.request.activity.key);put("purpose",plan.request.purpose.name)
         put("minutes",plan.request.minutes);put("loop",plan.request.returnToStart);put("variation",plan.request.variation)
+        put("destination",plan.request.destination?.let { JSONArray(listOf(it.latitude,it.longitude)) } ?: JSONObject.NULL)
+        put("detourMinutes",plan.request.detourMinutes);put("neighborhoodId",plan.request.neighborhoodId ?: JSONObject.NULL)
+        put("baselineSeconds",plan.baselineSeconds ?: JSONObject.NULL);put("neighborhoodFresh",plan.neighborhoodFreshMeters ?: JSONObject.NULL);put("neighborhoodTotal",plan.neighborhoodTotalMeters ?: JSONObject.NULL)
         put("start",JSONArray(listOf(plan.request.start.latitude,plan.request.start.longitude)))
         put("distance",plan.path.distanceMeters);put("seconds",plan.path.seconds);put("fresh",plan.estimatedNewMeters ?: JSONObject.NULL);put("returning",plan.returning)
         put("points",JSONArray().apply { plan.path.points.forEach { put(JSONArray(listOf(it.latitude,it.longitude))) } })
@@ -23,12 +26,14 @@ object PocketPlanCodec {
         val json = JSONObject(text); require(json.getInt("version") == 1)
         val start = json.getJSONArray("start");val points = json.getJSONArray("points");val steps = json.getJSONArray("steps")
         require(points.length() in 2..20_000 && steps.length() <= 10_000)
+        val destination=json.optJSONArray("destination")?.let { PocketPoint(it.getDouble(0),it.getDouble(1)) }
         val request = PocketRequest(PocketPoint(start.getDouble(0),start.getDouble(1)),json.getInt("minutes"),
-            ActivityKind.entries.single { it.key == json.getString("activity") },PocketPurpose.valueOf(json.getString("purpose")),json.getBoolean("loop"),json.optInt("variation"))
+            ActivityKind.entries.single { it.key == json.getString("activity") },PocketPurpose.valueOf(json.getString("purpose")),json.getBoolean("loop"),json.optInt("variation"),destination,json.optInt("detourMinutes"),json.optString("neighborhoodId").takeIf { !json.isNull("neighborhoodId") && it.isNotBlank() })
         val path = PocketPath((0 until points.length()).map { val p=points.getJSONArray(it);PocketPoint(p.getDouble(0),p.getDouble(1)) },
             (0 until steps.length()).map { val s=steps.getJSONArray(it);PocketStep(s.getInt(0),s.getString(1),s.getDouble(2)) },json.getDouble("distance"),json.getDouble("seconds"))
         val fresh = if(json.isNull("fresh")) null else json.getDouble("fresh").also { require(it.isFinite() && it >= 0 && it <= path.distanceMeters) }
-        return PocketPlan(json.getString("id"),request,path,fresh,json.optBoolean("returning"))
+        fun optional(name: String): Double? = if (json.isNull(name)) null else json.optDouble(name).also { require(it.isFinite() && it>=0 && it<=10_000_000) }
+        return PocketPlan(json.getString("id"),request,path,fresh,json.optBoolean("returning"),optional("baselineSeconds"),optional("neighborhoodFresh"),optional("neighborhoodTotal"))
     }
 }
 class PocketPlanStore(private val dao: ExplorationDao) {

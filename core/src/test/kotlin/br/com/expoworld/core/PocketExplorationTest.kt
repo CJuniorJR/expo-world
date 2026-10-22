@@ -65,4 +65,27 @@ class PocketExplorationTest {
         assertTrue(runCatching { PocketPoint(Double.NaN,0.0) }.isFailure)
         assertTrue(runCatching { PocketPoint(0.0,190.0) }.isFailure)
     }
+    @Test fun destinationKeepsExactEndAndHonorsExtraTimeWithoutSlack() {
+        val end=PocketPoint(-25.44,-49.28)
+        val r=request().copy(destination=end,detourMinutes=10)
+        val points=PocketPlanning.waypoints(r,0)
+        assertEquals(origin,points.first());assertEquals(end,points.last());assertEquals(3,points.size)
+        val p=path(seconds=1200.0,end=end)
+        assertTrue(PocketPlanning.fits(r,p,600.0))
+        assertFalse(PocketPlanning.fits(r,p.copy(seconds=1201.0),600.0))
+        assertFalse(PocketPlanning.fits(r,p,null))
+        assertFalse(PocketPlanning.fits(r,p.copy(points=listOf(origin,end,origin)),600.0))
+        assertEquals(listOf(origin,end),PocketPlanning.waypoints(r.copy(detourMinutes=0),0))
+        assertTrue(runCatching{r.copy(detourMinutes=61)}.isFailure)
+    }
+    @Test fun offlineRegionsAreBoundedAndIncludeRouteWithPadding() {
+        val points=listOf(origin,PocketPoint(-25.44,-49.28))
+        val area=OfflineJourneyArea.forPath(points)
+        assertTrue(area.south<points.minOf{it.latitude});assertTrue(area.north>points.maxOf{it.latitude})
+        assertTrue(area.west<points.minOf{it.longitude});assertTrue(area.east>points.maxOf{it.longitude})
+        assertTrue(area.estimatedTiles in 1..4000)
+        assertTrue(runCatching{OfflineJourneyArea.forPath(listOf(origin,PocketPoint(-24.0,-48.0)))}.isFailure)
+        assertTrue(runCatching{OfflineJourneyArea.forPath(listOf(PocketPoint(0.0,179.9),PocketPoint(0.0,-179.9)))}.isFailure)
+    }
+
 }

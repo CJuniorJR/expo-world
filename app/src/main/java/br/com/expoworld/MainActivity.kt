@@ -41,6 +41,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.withContext
+import br.com.expoworld.storage.BackupPreview
 import org.maplibre.android.MapLibre
 
 class MainActivity : ComponentActivity() {
@@ -54,35 +57,39 @@ class MainActivity : ComponentActivity() {
     private val permissionVersion = mutableIntStateOf(0)
     private var pendingStart = false
     private var pendingPocketStart = false
-    private val storageBusy = mutableStateOf(false)
-    private val storageMessage = mutableStateOf("")
-    private fun exportMedia(uri: android.net.Uri, animated: Boolean) {
+    private val operations by lazy {
+        androidx.lifecycle.ViewModelProvider(this,object:androidx.lifecycle.ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST") override fun <T:androidx.lifecycle.ViewModel> create(modelClass:Class<T>):T = br.com.expoworld.storage.StorageOperations(app) as T
+        })[br.com.expoworld.storage.StorageOperations::class.java]
+    }
+    private val storageBusy get() = operations.busy
+    private val storageMessage get() = operations.message
+    private val exportProgress get() = operations.progress
+    private val restorePreview get() = operations.preview
+    private val backup get() = operations.backup
+    private fun cancelStorage() = operations.cancel()
+    private fun dismissRestore() = operations.dismissPreview()
+    private fun exportMedia(uri: android.net.Uri, kind: String) {
         val prefs = getSharedPreferences("map", MODE_PRIVATE)
         val mode = prefs.getString("exportMode", "real") ?: "real"
         val title = prefs.getString("cardTitle", "Minha expedição") ?: "Minha expedição"
         runBackup {
-            ExpeditionExporter(app).export(uri, mode, title, animated)
-            if (animated) "Replay salvo como GIF animado." else "Cartão salvo como imagem PNG."
+            val exporter = ExpeditionExporter(app)
+            if (kind == "video") exporter.exportVideo(uri, mode, title) { exportProgress.floatValue=it }
+            else exporter.export(uri, mode, title, kind == "gif") { exportProgress.floatValue=it }
+            when(kind) { "video" -> "Vídeo MP4 salvo."; "gif" -> "Animação GIF salva."; else -> "Imagem PNG salva." }
         }
     }
-    private val exportCard = registerForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri -> uri?.let { exportMedia(it, false) } }
-    private val exportAnimation = registerForActivityResult(ActivityResultContracts.CreateDocument("image/gif")) { uri -> uri?.let { exportMedia(it, true) } }
+    private val exportCard = registerForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri -> uri?.let { exportMedia(it, "png") } }
+    private val exportAnimation = registerForActivityResult(ActivityResultContracts.CreateDocument("image/gif")) { uri -> uri?.let { exportMedia(it, "gif") } }
+    private val exportVideo = registerForActivityResult(ActivityResultContracts.CreateDocument("video/mp4")) { uri -> uri?.let { exportMedia(it, "video") } }
     private val exportBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        uri?.let { runBackup { "Backup salvo: ${BackupManager(app).export(it)} células reais. Guarde o arquivo para restaurar em outro aparelho." } }
+        uri?.let { runBackup { "Backup completo salvo: ${backup.export(it)} células, incluindo histórico, bairros, roteiros e preferências." } }
     }
     private val importBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { runBackup { "Restauração concluída: ${BackupManager(app).restore(it)} células novas adicionadas. Seus dados anteriores foram preservados." } }
+        uri?.let { runBackup { restorePreview.value=backup.prepareRestore(it); "Arquivo conferido. Revise o conteúdo antes de restaurar." } }
     }
-    private fun runBackup(action: suspend () -> String) {
-        if (app.tracking.value.active || app.storageBusy) { storageMessage.value = "Encerre a viagem antes de usar o backup."; return }
-        app.storageBusy = true; storageBusy.value = true; storageMessage.value = "Processando arquivo…"
-        lifecycleScope.launch {
-            try { storageMessage.value = action(); worldMap.refreshFog() }
-            catch (e: CancellationException) { throw e }
-            catch (e: Exception) { storageMessage.value = if (e is br.com.expoworld.storage.MapExportUnavailable) e.message.orEmpty() else "Não foi possível concluir a operação. Confira o arquivo e o espaço livre. A exploração salva foi preservada." }
-            finally { app.storageBusy = false; storageBusy.value = false }
-        }
-    }
+    private fun runBackup(allowPreview: Boolean = false, action: suspend () -> String) = operations.run(allowPreview,action)
     private val manager get() = getSystemService(LocationManager::class.java)
     private val preview = object : LocationListener {
         override fun onLocationChanged(location: Location) {
@@ -181,9 +188,17 @@ class MainActivity : ComponentActivity() {
         val state by app.tracking.collectAsStateWithLifecycle()
         val pocket by app.pocket.state.collectAsStateWithLifecycle()
         var pocketOpen by rememberSaveable { mutableStateOf(false) }
+        var pocketLibrary by rememberSaveable { mutableStateOf(false) }
         var pickingPocketStart by remember { mutableStateOf(false) }
         var chosenLat by rememberSaveable { mutableStateOf<Double?>(null) }
         var chosenLon by rememberSaveable { mutableStateOf<Double?>(null) }
+        var destinationLat by rememberSaveable { mutableStateOf<Double?>(null) }
+        var destinationLon by rememberSaveable { mutableStateOf<Double?>(null) }
+        var choosingDestination by rememberSaveable { mutableStateOf(false) }
+        var initialNeighborhood by rememberSaveable { mutableStateOf<String?>(null) }
+        LaunchedEffect(state.active) {
+            if(!state.active && !app.storageBusy) withContext(kotlinx.coroutines.Dispatchers.IO) { app.repository.archiveLastRealRoute() }
+        }
         val pocketScope=rememberCoroutineScope()
         val realPosition=state.position?.takeIf { !state.simulated && it.accuracy<=50 && SystemClock.elapsedRealtimeNanos()/1e9-it.monotonicSeconds in 0.0..30.0 }
         val pocketProgress=remember(pocket.plan?.id,state.active) { br.com.expoworld.core.PocketProgress() }
@@ -198,6 +213,12 @@ class MainActivity : ComponentActivity() {
         val preferences = remember { getSharedPreferences("map", MODE_PRIVATE) }
         var cardTitle by rememberSaveable { mutableStateOf(preferences.getString("cardTitle", "Minha expedição") ?: "Minha expedição") }
         var fogOpacity by remember { mutableFloatStateOf(preferences.getFloat("fogOpacity", .55f).coerceIn(.2f, .8f)) }
+        val storageRevision by operations.revision
+        LaunchedEffect(storageRevision) {
+            fogOpacity=preferences.getFloat("fogOpacity",.55f).coerceIn(.2f,.8f)
+            cardTitle=preferences.getString("cardTitle","Minha expedição") ?: "Minha expedição"
+            worldMap.refreshFog()
+        }
         val viewMode = if (state.active) { if (state.simulated) "simulation" else "real" } else if (simulatedView) "simulation" else "real"
         LaunchedEffect(pocket.plan,viewMode) { worldMap.setPocket(pocket.plan.takeIf { viewMode == "real" }) }
         val progressFlow = remember(viewMode) { app.repository.progress(viewMode) }
@@ -226,8 +247,16 @@ class MainActivity : ComponentActivity() {
         var saveBusy by remember { mutableStateOf(false) }
         var saveMessage by remember { mutableStateOf("") }
         val saveScope = rememberCoroutineScope()
-        LaunchedEffect(viewMode, state.active) { selectedSavedId = null; saveMessage = "" }
+        var previousViewMode by rememberSaveable { mutableStateOf(viewMode) }
+        var previousActive by rememberSaveable { mutableStateOf(state.active) }
+        LaunchedEffect(viewMode,state.active) {
+            if(previousViewMode!=viewMode || previousActive!=state.active){selectedSavedId=null;saveMessage=""}
+            previousViewMode=viewMode;previousActive=state.active
+        }
         LaunchedEffect(selectedTrace) { selectedTrace?.let { traceVisible = true; worldMap.focusTrace(it) } }
+        LaunchedEffect(selectedSavedId) {
+            savedRoutes.firstOrNull{it.id==selectedSavedId}?.let{saved->cardTitle=saved.title.take(40);preferences.edit().putString("cardTitle",cardTitle).apply()}
+        }
         var focusAfterTrip by rememberSaveable { mutableStateOf<Long?>(null) }
         val mapStatus by mapMessage
         val currentDialog by dialog
@@ -264,7 +293,15 @@ class MainActivity : ComponentActivity() {
         ExplorationScreen(
             worldMap = worldMap,
             onThemeChange = { app.selectTheme(it) },
-            onPocketOpen = { worldMap.cancelPocketPick();pickingPocketStart=false;pocketOpen=true },
+            onPocketOpen = { worldMap.cancelPocketPick();pickingPocketStart=false;initialNeighborhood=null;pocketLibrary=false;pocketOpen=true },
+            onRoutesOpen = { initialNeighborhood=null;pocketLibrary=true;pocketOpen=true },
+            onPocketStart = { pocket.plan?.let{plan->
+                if(realPosition!=null && br.com.expoworld.core.PocketPoint(realPosition.latitude,realPosition.longitude).distance(plan.path.points.first())<=150 && !state.active && !app.storageBusy) {
+                    app.tracking.update{it.copy(activity=plan.request.activity)};pendingPocketStart=true;selectedSavedId=null;prepareStart()
+                }
+            } },
+            canPocketStart = realPosition?.let{p->pocket.plan?.path?.points?.firstOrNull()?.let{br.com.expoworld.core.PocketPoint(p.latitude,p.longitude).distance(it)<=150}}==true,
+            onNeighborhoodPlan = { id -> initialNeighborhood=id;pocketLibrary=false;pocketOpen=true },
             pocket = pocket,
             pocketInstruction = nextPocketStep?.instruction,
             onPocketReturn = { realPosition?.let{app.pocket.returnNow(pocketScope,br.com.expoworld.core.PocketPoint(it.latitude,it.longitude))} },
@@ -298,12 +335,15 @@ class MainActivity : ComponentActivity() {
             onScenarioChange = { scenarioIndex = it.ordinal },
             storageBusy = storageBusy.value,
             storageMessage = storageMessage.value,
+            exportProgress = exportProgress.floatValue,
+            onCancelStorage = { cancelStorage() },
             onExport = { exportBackup.launch("expo-world-${java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date())}.expoworld") },
             onImport = { importBackup.launch(arrayOf("application/octet-stream", "text/plain", "*/*")) },
             cardTitle = cardTitle,
             onCardTitleChange = { cardTitle = it.take(40); preferences.edit().putString("cardTitle", cardTitle).apply() },
             onCardExport = { preferences.edit().putString("exportMode", selectedSavedId ?: viewMode).apply(); exportCard.launch("expo-world-cartao.png") },
             onAnimationExport = { preferences.edit().putString("exportMode", selectedSavedId ?: viewMode).apply(); exportAnimation.launch("expo-world-replay.gif") },
+            onVideoExport = { preferences.edit().putString("exportMode", selectedSavedId ?: viewMode).apply(); exportVideo.launch("expo-world-replay.mp4") },
             trace = displayedRoute,
             traceVisible = traceVisible,
             onTraceVisibleChange = { traceVisible = it },
@@ -352,7 +392,28 @@ class MainActivity : ComponentActivity() {
             onUsePosition={chosenLat=null;chosenLon=null},
             onPickStart={pocketOpen=false;pickingPocketStart=true;worldMap.choosePocketStart{point->chosenLat=point.latitude;chosenLon=point.longitude;pocketOpen=true}},
             onStart={plan->app.pocket.select(plan);app.tracking.update{it.copy(activity=plan.request.activity)};pendingPocketStart=true;prepareStart()},
-            onLocation={requestLocation(false)},onDismiss={pocketOpen=false})
+            onLocation={requestLocation(false)},onDismiss={pocketOpen=false},
+            chosenDestination=destinationLat?.let{lat->destinationLon?.let{lon->br.com.expoworld.core.PocketPoint(lat,lon)}},
+            onPickDestination={pocketOpen=false;choosingDestination=true;worldMap.choosePocketStart{point->destinationLat=point.latitude;destinationLon=point.longitude;choosingDestination=false;pocketOpen=true}},
+            onClearDestination={destinationLat=null;destinationLon=null},
+            initialNeighborhoodId=initialNeighborhood,openLibrary=pocketLibrary)
+        if(choosingDestination) {
+            androidx.activity.compose.BackHandler { choosingDestination=false;worldMap.cancelPocketPick();pocketOpen=true }
+            Surface(Modifier.fillMaxWidth().statusBarsPadding().padding(16.dp),tonalElevation=8.dp) {
+                Column(Modifier.padding(16.dp)) { Text("Toque no destino desejado no mapa.")
+                    TextButton(onClick={choosingDestination=false;worldMap.cancelPocketPick();pocketOpen=true}){Text("Cancelar escolha")}
+                }
+            }
+        }
+        restorePreview.value?.let { preview ->
+            AlertDialog(onDismissRequest={if(!operations.running.value)dismissRestore()},title={Text("Restaurar este backup?")},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+                Text("${preview.cells} células • ${preview.routes} viagens • ${preview.plannedRoutes} roteiros")
+                Text("${preview.expeditions} expedições • ${preview.streetVisits} créditos de ruas")
+                Text(if(preview.hasPreferences) "Inclui tema e preferências. Não inclui mapas baixados." else "Backup antigo de descobertas; outros dados não estão no arquivo.")
+                Text("O arquivo foi validado. A restauração mescla os registros e mantém sua exploração atual.")
+            if(operations.running.value)LinearProgressIndicator(Modifier.fillMaxWidth())
+            }},confirmButton={TextButton(enabled=!operations.running.value,onClick={runBackup(allowPreview=true){try {val added=backup.restorePrepared();"Restauração concluída: $added células novas. Histórico e exploração preservados."}finally{restorePreview.value=null}}}){Text("Restaurar e mesclar")}},dismissButton={TextButton(onClick={if(operations.running.value)cancelStorage() else dismissRestore()}){Text(if(operations.running.value)"Cancelar restauração" else "Cancelar")}})
+        }
         if (currentDialog.isNotEmpty()) AlertDialog(
             onDismissRequest = { dialog.value = ""; pendingStart = false },
             title = { Text(when (currentDialog) { "location" -> "Localização precisa"; "gps" -> "Ative o GPS"; else -> "Notificação da viagem" }) },

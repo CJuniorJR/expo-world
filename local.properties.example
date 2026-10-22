@@ -8,3 +8,7 @@ MAPTILER_KEY=YOUR_DEVELOPMENT_KEY
 # Optional HTTPS Valhalla endpoint for route planning (without trailing /route).
 # Debug uses the public FOSSGIS demo for personal testing; release requires a configured service.
 # ROUTING_URL=https://your-valhalla.example
+
+# Pré-download de mapas somente com provedor/plano ou acordo que permita o uso offline.
+# MapTiler Cloud padrão: manter false. Não é chave, nem libera permissão no provedor.
+OFFLINE_MAPS_ALLOWED=false

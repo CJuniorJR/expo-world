@@ -142,6 +142,22 @@ class HistoryBackupTest {
             assertEquals(0L,target.cells().count("real").first())
         } finally { source.close();target.close();file.delete() }
     }
+    @Test fun fogPreferenceEndpointsAndNonfiniteFallbackExportAndRestore() = runBlocking {
+        val source=database();val target=database();val file=File.createTempFile("fog-backup-",".expoworld",context.cacheDir)
+        try {
+            val preferences=context.getSharedPreferences("map",0)
+            val exporter=BackupManager(context,source,{ExplorerTheme.fromKey(null)},{})
+            val importer=BackupManager(context,target,{ExplorerTheme.fromKey(null)},{})
+            listOf(.2f to .2f,.8f to .8f,Float.NaN to .55f).forEach { (original,expected) ->
+                preferences.edit().putFloat("fogOpacity",original).commit()
+                assertEquals(0L,exporter.export(Uri.fromFile(file)))
+                assertTrue(importer.prepareRestore(Uri.fromFile(file)).hasPreferences)
+                preferences.edit().putFloat("fogOpacity",.4f).commit()
+                assertEquals(0L,importer.restorePrepared())
+                assertEquals(expected,preferences.getFloat("fogOpacity",0f),.000001f)
+            }
+        } finally { source.close();target.close();file.delete() }
+    }
     @Test fun corruptAndBrokenLinkedBackupsAreRejectedBeforeAnyMerge() = runBlocking {
         val db=database();val file=File.createTempFile("invalid-backup-",".expoworld",context.cacheDir)
         try {

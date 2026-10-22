@@ -52,6 +52,8 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
     private var encodedTrace: Pair<String, String>? = null
     private var focusPending: RecordedTrace? = null
     private val emptyFeatures = """{"type":"FeatureCollection","features":[]}"""
+    private var expeditionData = emptyFeatures
+    private var expeditionJob: Job? = null
     private val fogMutex = Mutex()
     private var following = false
     private var loadFailure = false
@@ -177,6 +179,8 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
                 iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
                 iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_MAP), iconAllowOverlap(false)
             ).apply { minZoom = 14f })
+            s.addSource(GeoJsonSource("expedition-routes",expeditionData))
+            s.addLayer(LineLayer("expedition-lines","expedition-routes").withProperties(lineColor(Expression.get("color")),lineWidth(5f),lineCap(Property.LINE_CAP_ROUND),lineJoin(Property.LINE_JOIN_ROUND)))
             s.addSource(GeoJsonSource("accuracy", AccuracyGeometry.geoJson(accuracyFix)))
             s.addLayer(FillLayer("accuracy-fill", "accuracy").withProperties(fillColor("#69ABFF"), fillOpacity(.16f)))
             s.addLayer(LineLayer("accuracy-border", "accuracy").withProperties(lineColor("#69ABFF"), lineWidth(1.5f)))
@@ -263,6 +267,29 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
     fun setActivity(value: ActivityKind) {
         activity = value
         style?.getLayerAs<SymbolLayer>("position-palio")?.setProperties(iconImage(activityIcon()))
+    }
+    fun showExpedition(traces: List<RecordedTrace>) {
+        expeditionJob?.cancel()
+        if(traces.isEmpty()) { expeditionData=emptyFeatures;style?.getSourceAs<GeoJsonSource>("expedition-routes")?.setGeoJson(emptyFeatures);return }
+        expeditionJob=scope.launch {
+            val json=withContext(Dispatchers.Default) {
+                val features=org.json.JSONArray()
+                for(route in traces) {
+                    ensureActive()
+                    if(features.length()>=50_000)break
+                    val source=org.json.JSONObject(TracePresentation.lineGeoJson(route.samples,route.activity,theme)).getJSONArray("features")
+                    for(i in 0 until source.length()) { ensureActive();if(features.length()>=50_000)break;features.put(source.getJSONObject(i)) }
+                }
+                org.json.JSONObject().put("type","FeatureCollection").put("features",features).toString()
+            }
+            expeditionData=json;style?.getSourceAs<GeoJsonSource>("expedition-routes")?.setGeoJson(json)
+            val samples=traces.flatMap{route->route.samples.filter{it.accepted}.let{points->if(points.isEmpty())emptyList() else listOf(points.minBy{it.latitude},points.maxBy{it.latitude},points.minBy{it.longitude},points.maxBy{it.longitude})}}
+            if(samples.isNotEmpty() && samples.maxOf{it.longitude}-samples.minOf{it.longitude}<180) {
+                val bounds=LatLngBounds.Builder().includes(samples.map{LatLng(it.latitude,it.longitude)}).build()
+                map?.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds,(density*55).toInt()))
+            }
+            if(org.json.JSONObject(json).getJSONArray("features").length()>=50_000)message("Expedição ampla: prévia limitada a 50 mil segmentos. Os trajetos completos estão preservados no histórico.")
+        }
     }
     fun focusNeighborhood(id: String) {
         scope.launch {
@@ -531,7 +558,7 @@ class WorldMap(context: Context, private val app: WorldApp, private val scope: C
             }
         }
     }
-    fun dispose() { fogJob?.cancel(); traceJob?.cancel(); visualJob?.cancel() }
+    fun dispose() { expeditionJob?.cancel(); fogJob?.cancel(); traceJob?.cancel(); visualJob?.cancel() }
 
     private fun activityPixelArt(kind: ActivityKind): Bitmap {
         val rows = if (kind == ActivityKind.WALK) listOf(

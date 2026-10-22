@@ -1,5 +1,8 @@
 package br.com.expoworld.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import br.com.expoworld.WorldApp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -68,6 +71,10 @@ fun ExplorationScreen(
     worldMap: WorldMap,
     onThemeChange: (ExplorerTheme) -> Unit,
     onPocketOpen: () -> Unit,
+    onRoutesOpen: () -> Unit,
+    onPocketStart: () -> Unit,
+    canPocketStart: Boolean,
+    onNeighborhoodPlan: (String) -> Unit,
     pocket: br.com.expoworld.storage.PocketState,
     pocketInstruction: String?,
     onPocketReturn: () -> Unit,
@@ -95,12 +102,15 @@ fun ExplorationScreen(
     onScenarioChange: (SimulationScenario) -> Unit,
     storageBusy: Boolean,
     storageMessage: String,
+    exportProgress: Float,
+    onCancelStorage: () -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
     cardTitle: String,
     onCardTitleChange: (String) -> Unit,
     onCardExport: () -> Unit,
     onAnimationExport: () -> Unit,
+    onVideoExport: () -> Unit,
     trace: RecordedTrace?,
     traceVisible: Boolean,
     onTraceVisibleChange: (Boolean) -> Unit,
@@ -122,7 +132,19 @@ fun ExplorationScreen(
 ) {
     var menuOpen by rememberSaveable { mutableStateOf(false) }
     var menuSection by rememberSaveable { mutableIntStateOf(0) }
+    var expeditionTraces by remember { mutableStateOf<List<RecordedTrace>>(emptyList()) }
+    var expeditionSummaryOpen by remember { mutableStateOf(false) }
+    val navigate: (Int) -> Unit = { index ->
+        when(index) {
+            0 -> menuOpen=false
+            1 -> { menuSection=1;menuOpen=true }
+            2 -> { menuOpen=false;onRoutesOpen() }
+            3 -> { menuSection=2;menuOpen=true }
+        }
+    }
+    BackHandler(menuOpen) { menuOpen=false }
     var confirmEnd by rememberSaveable { mutableStateOf(false) }
+    var gpsDialog by rememberSaveable { mutableStateOf(false) }
     val requestTripAction: () -> Unit = {
         if (state.active) confirmEnd = true
         else { menuOpen = false; onTripToggle() }
@@ -147,6 +169,8 @@ fun ExplorationScreen(
     var replayFraction by rememberSaveable { mutableFloatStateOf(0f) }
     var playing by remember { mutableStateOf(false) }
     var cardOpen by rememberSaveable { mutableStateOf(false) }
+    var previewPlaying by remember { mutableStateOf(false) }
+    var previewFraction by remember { mutableFloatStateOf(1f) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) playing = false }
@@ -171,6 +195,7 @@ fun ExplorationScreen(
         }
     }
     val context = androidx.compose.ui.platform.LocalContext.current
+    val app = context.applicationContext as WorldApp
     val palette = LocalExplorerTheme.current
     var cardMap by remember { mutableStateOf<br.com.expoworld.storage.ExpeditionMapImage?>(null) }
     var cardMapError by remember { mutableStateOf("") }
@@ -187,10 +212,19 @@ fun ExplorationScreen(
         onDispose { image?.bitmap?.recycle() }
     }
     var art by remember { mutableStateOf<List<ArtCommand>>(emptyList()) }
-    LaunchedEffect(cardOpen, trace, cardTitle, cardMap, palette) {
-        if (cardOpen && trace != null) art = withContext(Dispatchers.Default) {
-            val date = java.text.SimpleDateFormat("dd.MM.yyyy", Locale.forLanguageTag("pt-BR")).format(java.util.Date(trace.startedAtMillis))
-            ExpeditionArt.scene(trace, cardTitle, date, theme = palette, mapPoint = cardMap?.point)
+    LaunchedEffect(cardOpen,trace,cardTitle,cardMap,palette,previewPlaying) {
+        if(cardOpen && trace!=null) {
+            val timeline=br.com.expoworld.core.TraceRenderTimeline(trace.activity.stopKmh)
+            val date=java.text.SimpleDateFormat("dd.MM.yyyy",Locale.forLanguageTag("pt-BR")).format(java.util.Date(trace.startedAtMillis))
+            val started=android.os.SystemClock.elapsedRealtime()
+            if(previewPlaying)previewFraction=0f
+            do {
+                art=withContext(Dispatchers.Default) { ExpeditionArt.scene(trace,cardTitle,date,fraction=previewFraction,theme=palette,mapPoint=cardMap?.point,timeline=timeline) }
+                if(!previewPlaying||previewFraction>=1f)break
+                delay(100)
+                previewFraction=((android.os.SystemClock.elapsedRealtime()-started)/10000f).coerceAtMost(1f)
+            } while(true)
+            if(previewPlaying)previewPlaying=false
         }
     }
     var summaryOpen by rememberSaveable { mutableStateOf(false) }
@@ -207,7 +241,7 @@ fun ExplorationScreen(
     val density = LocalDensity.current
     val topInset = WindowInsets.safeDrawing.getTop(density)
     val bottomInset = WindowInsets.safeDrawing.getBottom(density)
-    LaunchedEffect(topInset, bottomInset, presentation) { worldMap.setInsets(topInset, bottomInset + if (presentation != MapPresentation.NORMAL) (density.density * 120).toInt() else 0) }
+    LaunchedEffect(topInset, bottomInset, presentation) { worldMap.setInsets(topInset, bottomInset + (density.density * (if (presentation != MapPresentation.NORMAL) 200 else 80)).toInt()) }
     val activeGps = state.active && !state.simulated
     val waitingGps = activeGps && !state.message.startsWith("Explorando")
     val statusLabel = when {
@@ -260,27 +294,36 @@ fun ExplorationScreen(
                         Column {
                             Text("EXPO WORLD", fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("Cada caminho, uma descoberta", fontSize = 10.sp, color = Muted,
+                            Text("Cada caminho, uma descoberta", fontSize = 12.sp, color = Muted,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
-                FilledTonalIconButton(onClick = { menuOpen = true }, modifier = Modifier.size(56.dp),
+                FilledTonalIconButton(onClick = { menuSection=3;menuOpen = true }, modifier = Modifier.size(56.dp),
                     colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = Ink, contentColor = Paper)) {
-                    Icon(painterResource(R.drawable.ic_menu), "Abrir menu e informações", modifier = Modifier.size(24.dp))
+                    Icon(painterResource(R.drawable.ic_settings), "Abrir ajustes", modifier = Modifier.size(24.dp))
                 }
             }
 
-            if (!state.active && presentation == MapPresentation.NORMAL) Row(
+            if (presentation == MapPresentation.NORMAL) Column(
                 Modifier.align(Alignment.TopStart).padding(top = 90.dp).fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = { onPocketOpen() }, enabled = !simulatedView && !storageBusy,
-                    modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 10.dp)) { Text("Planejar volta") }
-                FilledTonalButton(onClick = { menuSection = 1; menuOpen = true }, modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 10.dp)) {
-                    Text("Bairros" + if (cityProgress.totalMeters > 0) String.format(Locale.forLanguageTag("pt-BR"),
-                        " • %.1f%%", 100 * cityProgress.visitedMeters / cityProgress.totalMeters) else "")
+                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (!state.active) Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                    ActivityKind.entries.forEach { activity ->
+                        FilterChip(selected=state.activity==activity,enabled=!storageBusy,onClick={onActivityChange(activity)},
+                            label={Text(if(activity==ActivityKind.WALK) "A pé" else activity.label)},modifier=Modifier.weight(1f))
+                    }
                 }
+                val neighborhood=cityProgress.neighborhoods.firstOrNull{it.id==cityProgress.currentNeighborhoodId}
+                Surface(onClick={navigate(1)},color=Ink.copy(alpha=.96f),contentColor=Paper,shape=RoundedCornerShape(16.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                        Text(neighborhood?.let{String.format(Locale.forLanguageTag("pt-BR"),"%s • %.1f%% explorado",it.name,it.fraction*100)}
+                            ?: "Curitiba • ver progresso por bairro",fontWeight=FontWeight.SemiBold)
+                        Text("${state.activity.label} • ${if(simulatedView) "SIMULADO • descobertas separadas" else "Exploração real"}",style=MaterialTheme.typography.labelMedium,color=Mint)
+                    }
+                }
+                if (!state.active) FilledTonalButton(onClick=onPocketOpen,enabled=!simulatedView&&!storageBusy,
+                    modifier=Modifier.fillMaxWidth()){Text("Planejar uma volta no meu tempo")}
             }
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -303,14 +346,21 @@ fun ExplorationScreen(
                                 }
                             }
                             MapPresentation.EPOCHS -> DiscoveryEpoch.entries.forEach { epoch ->
-                                Text("● ${epoch.label}", color = Color(android.graphics.Color.parseColor(epoch.color)), fontSize = 11.sp)
+                                Text("● ${epoch.label}", color = Color(android.graphics.Color.parseColor(epoch.color)), fontSize = 12.sp)
                             }
                             else -> Unit
                         }
-                        if (presentation != MapPresentation.EPOCHS) Text("Aproxime para comparar ou animar a névoa no detalhe.", color = Muted, fontSize = 10.sp)
+                        if (presentation != MapPresentation.EPOCHS) Text("Aproxime para comparar ou animar a névoa no detalhe.", color = Muted, fontSize = 12.sp)
                     }
                 }
-                Surface(onClick = { menuOpen = true }, color = Ink.copy(alpha = .94f), contentColor = statusColor,
+                Surface(onClick = {
+                    when {
+                        simulatedView -> {menuSection=3;menuOpen=true}
+                        !precise -> onLocationPermission()
+                        state.message.contains("GPS desligado") -> onGpsSettings()
+                        else -> gpsDialog=true
+                    }
+                }, color = Ink.copy(alpha = .94f), contentColor = statusColor,
                     shape = CircleShape) {
                     Row(Modifier.padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -319,24 +369,31 @@ fun ExplorationScreen(
                             Text(statusLabel, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                             if (!simulatedView && precise && !state.paused) Text(gpsSignal.label +
                                 (gpsSignal.accuracyMeters?.let { " • ~${it.toInt()} m" } ?: ""),
-                                color = if (gpsSignal.quality == GpsQuality.GOOD) Mint else Color(0xFFFFD589), fontSize = 10.sp)
+                                color = if (gpsSignal.quality == GpsQuality.GOOD) Mint else Color(0xFFFFD589), fontSize = 12.sp)
                         }
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    Button(onClick = { if (state.active) onPauseToggle() else requestTripAction() }, enabled = !storageBusy,
+                    Button(onClick = { if (state.active) onPauseToggle() else if(pocket.plan!=null&&!simulatedView)onPocketStart() else requestTripAction() },
+                        enabled = !storageBusy && (state.active || pocket.plan==null || simulatedView || canPocketStart),
                         colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Ink), shape = RoundedCornerShape(20.dp),
                         modifier = Modifier.weight(1f).heightIn(min = 56.dp), contentPadding = PaddingValues(14.dp)) {
                         Icon(painterResource(if (state.active) { if (state.paused) R.drawable.ic_play else R.drawable.ic_pause } else R.drawable.ic_explore), null,
                             modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(10.dp))
-                        Text(if (state.active) { if (state.paused) "Continuar percurso" else "Pausar percurso" } else actionLabel, fontWeight = FontWeight.SemiBold)
+                        Text(if (state.active) { if (state.paused) "Continuar percurso" else "Pausar percurso" } else if(pocket.plan!=null&&!simulatedView)"Começar roteiro" else actionLabel, fontWeight = FontWeight.SemiBold)
                     }
                     FilledTonalIconButton(onClick = onCenter, modifier = Modifier.size(56.dp),
                         colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = if (following) Mint else Ink, contentColor = if (following) Ink else Mint)) {
                         Icon(painterResource(R.drawable.ic_center), if (following) "Acompanhando minha posição" else "Centralizar na minha posição", modifier = Modifier.size(24.dp))
                     }
+                }
+                if(!state.active && pocket.plan!=null && !simulatedView) {
+                    val plan=pocket.plan
+                    Text("${plan.request.activity.label} • ${String.format(Locale.forLanguageTag("pt-BR"),"%.1f km",plan.path.distanceMeters/1000)} • cerca de ${(plan.path.seconds/60).toInt()} min",color=Mint,style=MaterialTheme.typography.labelLarge)
+                    if(!canPocketStart) Text("Obtenha GPS e aproxime-se da partida para começar este roteiro.",color=Paper,style=MaterialTheme.typography.bodySmall)
+                    TextButton(onClick=requestTripAction,enabled=!storageBusy){Text("Explorar livremente sem seguir roteiro")}
                 }
                 if (state.active) TextButton(onClick = requestTripAction, enabled = !storageBusy,
                     colors = ButtonDefaults.textButtonColors(contentColor = if (palette.light) Color(0xFF9B3028) else Color(0xFFFFB4AB))) {
@@ -351,38 +408,25 @@ fun ExplorationScreen(
                         OutlinedButton(enabled=canPocketReturn && !pocket.busy,onClick=onPocketReturn,modifier=Modifier.fillMaxWidth()){Text(if(pocket.busy)"Calculando volta…" else "Voltar ao início agora")}
                     }
                 }
-                // Attribution stays visible even with the information menu closed.
-                Text("© MapTiler  ·  © OpenStreetMap contributors", color = Color(0xFFE0E7E9), fontSize = 10.sp)
+                if(mapStatus.isNotBlank()) OutlinedButton(onClick={worldMap.reload()},modifier=Modifier.fillMaxWidth()) {Text("Recarregar mapa")}
+                Text("© MapTiler  ·  © OpenStreetMap contributors", color = Color(0xFFE0E7E9), fontSize = 12.sp)
+                if(expeditionTraces.isNotEmpty()) TextButton(onClick={worldMap.showExpedition(emptyList());expeditionTraces=emptyList()}){Text("Sair do mapa da expedição")}
+                PrimaryNavigation(0,navigate)
             }
         }
     }
 
-    if (menuOpen) ModalBottomSheet(
-        onDismissRequest = { menuOpen = false },
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Ink,
-        contentColor = Paper,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
-    ) {
-        Column(Modifier.fillMaxWidth().fillMaxHeight(.94f).padding(horizontal = 20.dp),
+    if (menuOpen) Surface(Modifier.fillMaxSize(),color=Ink,contentColor=Paper) {
+        Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Sua exploração", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text(when(menuSection){1->"Bairros";2->"Histórico";3->"Ajustes";else->"Explorar"}, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text(if (simulatedView) "Modo simulado • dados separados" else "Novos caminhos, no seu ritmo", color = Muted,
                         style = MaterialTheme.typography.bodySmall)
                 }
                 IconButton(onClick = { menuOpen = false }) {
                     Icon(painterResource(R.drawable.ic_close), "Fechar menu")
-                }
-            }
-            listOf("Explorar", "Bairros", "Trajetos", "Ajustes").chunked(2).forEachIndexed { row, labels ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    labels.forEachIndexed { column, label ->
-                        val index = row * 2 + column
-                        FilterChip(selected = menuSection == index, onClick = { menuSection = index },
-                            label = { Text(label, fontWeight = FontWeight.SemiBold) }, modifier = Modifier.weight(1f))
-                    }
                 }
             }
             Text(when (menuSection) {
@@ -426,9 +470,8 @@ fun ExplorationScreen(
                             modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) { Text(actionLabel, fontWeight = FontWeight.SemiBold) }
                     }
                     if (menuSection == 1) {
-                        NeighborhoodPanel(cityProgress, simulatedView, state.position != null && state.simulated == simulatedView) { id ->
-                            onNeighborhoodFocus(id); menuOpen = false
-                        }
+                        NeighborhoodPanel(cityProgress, simulatedView, state.position != null && state.simulated == simulatedView,
+                            onFocus={id->onNeighborhoodFocus(id);menuOpen=false},onPlan={id->menuOpen=false;onNeighborhoodPlan(id)})
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             InfoCard(areaLabel(progress.areaSquareMeters), "área descoberta • estimativa", Modifier.weight(1f))
                             InfoCard("50 m", "de cada lado do trajeto", Modifier.weight(1f))
@@ -450,113 +493,16 @@ fun ExplorationScreen(
 
                     }
                     if (menuSection == 2) {
-                        Text("Rever e compartilhar", style = MaterialTheme.typography.titleMedium)
-                        if (!state.active) {
-                            OutlinedButton(onClick = { presentationIndex = MapPresentation.EPOCHS.ordinal; playing = false; menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
-                                Text("Mapa das primeiras vezes")
-                            }
-                            if (trace != null && trace.samples.isNotEmpty()) {
-                                OutlinedButton(onClick = { onTraceVisibleChange(true); onTraceFocus(); comparison = .5f; presentationIndex = MapPresentation.COMPARE.ordinal; playing = false; menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
-                                    Text("Comparar antes e depois")
-                                }
-                                OutlinedButton(onClick = { onTraceVisibleChange(true); replayFraction = 0f; presentationIndex = MapPresentation.REPLAY.ordinal; playing = true; menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
-                                    Text("Reproduzir percurso selecionado")
-                                }
-                                Button(onClick = { playing = false; cardOpen = true; menuOpen = false }, enabled = !storageBusy, modifier = Modifier.fillMaxWidth()) {
-                                    Text("Criar cartão e exportar animação")
-                                }
-                            }
-                        } else Text("Encerre a viagem para rever e exportar.", color = Muted)
-                        if (trace != null && !state.active) OutlinedButton(onClick = { summaryOpen = true; menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
-                            Text("Abrir resumo do percurso")
-                        }
-                        Text("Replay e comparação não alteram suas descobertas. Datas antigas ficam desconhecidas. Viagens antigas podem ter apenas replay da linha, sem a ordem de revelação. Sem áreas novas registradas, antes e depois ficam iguais. Pausas e falhas de sinal são respeitadas.", color = Muted,
-                            style = MaterialTheme.typography.bodySmall)
-                        HorizontalDivider(color = Track)
-                        Text("Salve o percurso real antes de começar outro para mantê-lo na sua lista.", color = Muted,
-                            style = MaterialTheme.typography.bodySmall)
-                        if (!simulatedView) {
-                            if (canSave) Button(enabled = !saveBusy, onClick = { routeTitle = ""; titleDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                                Text(if (saveBusy) "Salvando…" else "Salvar trajeto com título")
-                            }
-                            if (saveMessage.isNotEmpty()) Text(saveMessage, color = Mint)
-                            Text("Trajetos realizados salvos", style = MaterialTheme.typography.titleMedium)
-                            if (savedRoutes.isEmpty()) Text("Seus trajetos reais salvos aparecerão aqui.", color = Muted)
-                            if (selectedSavedId != null) OutlinedButton(onClick = { onSavedRouteSelect(null) }) { Text("Voltar ao último percurso") }
-                            savedRoutes.forEach { saved ->
-                                OutlinedButton(enabled = !state.active, onClick = { onSavedRouteSelect(saved.id); menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
-                                    Column(Modifier.fillMaxWidth()) {
-                                        Text(saved.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                        Text(ActivityKind.fromKey(saved.activity).label + " • " + java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
-                                            .format(java.util.Date(saved.startedAtMillis)), style = MaterialTheme.typography.bodySmall)
-                                    }
-                                }
-                            }
-                        }
-                        OutlinedButton(onClick = { traceDetails = !traceDetails }, modifier = Modifier.fillMaxWidth()) {
-                            Text(if (traceDetails) "Ocultar detalhes do rastro" else "Ver detalhes e cores do rastro")
-                        }
-                        if (traceDetails) {
-                            HorizontalDivider(color = Track)
-                            Text("Rastro por velocidade", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                            trace?.let { Text("Percurso: ${it.activity.label}", color = Muted, style = MaterialTheme.typography.bodySmall) }
-                            savedRoutes.firstOrNull { it.id == selectedSavedId }?.let { Text(it.title, color = Mint) }
-                            if (trace?.isInterrupted(state.active) == true) Text(
-                                "Recuperamos o trecho salvo antes da interrupção. A gravação está encerrada; iniciar outra viagem substitui este rastro ao receber o primeiro ponto válido.",
-                                color = Color(0xFFFFD589), style = MaterialTheme.typography.bodySmall)
-                            if (trace != null) InfoCard(trace.newAreaSquareMeters?.let { areaLabel(it) } ?: "—",
-                                if (trace.newAreaSquareMeters == null) "área nova indisponível neste percurso antigo" else "área nova neste percurso • estimativa",
-                                Modifier.fillMaxWidth())
-                            when {
-                                trace == null || trace.samples.isEmpty() -> Text(if (state.active) "Aguardando a primeira posição precisa para desenhar o rastro ao vivo."
-                                    else "Inicie um percurso para ver o rastro ao vivo e consulte o resumo ao encerrar.", color = Muted,
-                                    style = MaterialTheme.typography.bodySmall)
-                                else -> {
-                                    if (state.active) Text("Rastro ao vivo. As cores e paradas se atualizam durante o percurso.", color = Mint,
-                                        style = MaterialTheme.typography.bodySmall)
-                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                        Text(if (state.active) "Rastro visível ao vivo" else "Exibir percurso", modifier = Modifier.weight(1f))
-                                        Switch(checked = traceVisible || state.active, onCheckedChange = onTraceVisibleChange, enabled = !state.active)
-                                    }
-                                    val currentSummary = summary
-                                    if (currentSummary != null) {
-                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                            InfoCard(distanceLabel(currentSummary.distanceMeters), "distância registrada", Modifier.weight(1f))
-                                            InfoCard(durationLabel(currentSummary.recordedSeconds), "tempo de registros", Modifier.weight(1f))
-                                        }
-                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                            InfoCard(durationLabel(currentSummary.stoppedSeconds), "parado • estimativa", Modifier.weight(1f))
-                                            InfoCard(if (trace.activity == ActivityKind.WALK) paceLabel(currentSummary.averageKmh)
-                                                else currentSummary.averageKmh?.let { String.format(Locale.forLanguageTag("pt-BR"), "%.0f km/h", it) } ?: "—",
-                                                if (trace.activity == ActivityKind.WALK) "ritmo médio • min/km" else "velocidade média • GPS", Modifier.weight(1f))
-                                        }
-                                        if (currentSummary.missingGpsSeconds >= 1) Text("${durationLabel(currentSummary.missingGpsSeconds)} sem registro (sinal ou pausa); lacunas não entram na distância.",
-                                            color = Muted, style = MaterialTheme.typography.bodySmall)
-                                        if (currentSummary.partial) Text("Resumo parcial: o percurso ultrapassou o limite de amostras e mostra a parte mais recente.",
-                                            color = Muted, style = MaterialTheme.typography.bodySmall)
-                                    }
-                                    Box(Modifier.fillMaxWidth().height(12.dp).background(
-                                        Brush.horizontalGradient(listOf(Color.Black,
-                                        Color(android.graphics.Color.parseColor(TracePresentation.color(trace.activity.brightKmh / 2, trace.activity.brightKmh, trace.activity.stopKmh, LocalExplorerTheme.current))),
-                                        themeColor(LocalExplorerTheme.current.traceLight))), RoundedCornerShape(6.dp)))
-                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("0 km/h", color = Muted, fontSize = 11.sp)
-                                        Text("${(trace.activity.brightKmh / 2).toInt()} km/h", color = Muted, fontSize = 11.sp)
-                                        Text("${trace.activity.brightKmh.toInt()}+ km/h", color = Muted, fontSize = 11.sp)
-                                    }
-                                    Text("Preto: parado (até ${trace.activity.stopKmh} km/h). Escuro: lento. Claro: mais rápido. Cinza: velocidade não estimada.", color = Muted,
-                                        style = MaterialTheme.typography.bodySmall)
-                                    val stoppedSeconds = currentSummary?.stoppedSeconds?.toInt() ?: 0
-                                    Text("${currentSummary?.stops ?: 0} paradas detectadas • ${stoppedSeconds / 60} min ${stoppedSeconds % 60} s",
-                                        color = Mint, style = MaterialTheme.typography.labelLarge)
-                                    Text("Paradas de pelo menos 5 segundos entram no resumo. O rastro fica preto, sem círculos. A velocidade não confirma congestionamento.",
-                                        color = Muted, style = MaterialTheme.typography.bodySmall)
-                                    OutlinedButton(onClick = { onTraceVisibleChange(true); onTraceFocus(); menuOpen = false }, modifier = Modifier.fillMaxWidth()) {
-                                        Text("Enquadrar percurso")
-                                    }
-                                }
-                            }
-                        }
+                        if(simulatedView) Text("A simulação não entra no seu histórico real. Volte ao modo real em Ajustes para abrir suas viagens.")
+                        else HistoryLibrary(app,savedRoutes,selectedSavedId,trace,cityProgress,state.active,
+                            onSelect=onSavedRouteSelect,
+                            onMap={onTraceVisibleChange(true);onTraceFocus();menuOpen=false},
+                            onReplay={onTraceVisibleChange(true);replayFraction=0f;presentationIndex=MapPresentation.REPLAY.ordinal;playing=true;menuOpen=false},
+                            onCompare={onTraceVisibleChange(true);comparison=.5f;presentationIndex=MapPresentation.COMPARE.ordinal;playing=false;menuOpen=false},
+                            onShare={playing=false;cardOpen=true;menuOpen=false},
+                            onEpochs={presentationIndex=MapPresentation.EPOCHS.ordinal;playing=false;menuOpen=false},
+                            onExpeditionMap={traces->expeditionTraces=traces;worldMap.showExpedition(traces);expeditionSummaryOpen=true;menuOpen=false})
+                        if(trace!=null && selectedSavedId==null) OutlinedButton(onClick={summaryOpen=true;menuOpen=false},modifier=Modifier.fillMaxWidth()){Text("Resumo do último percurso")}
                     }
                     if (menuSection == 3) {
                         ThemePicker(onThemeChange)
@@ -570,8 +516,8 @@ fun ExplorationScreen(
                             }
                             Switch(checked = highlight, onCheckedChange = onHighlightChange)
                         }
-                        Text("Backup das descobertas", style = MaterialTheme.typography.titleMedium)
-                        Text("Exporta a exploração real, sem o último rastro nem a simulação. Restaurar mescla as descobertas sem apagar as atuais. O arquivo contém lugares que você visitou; escolha onde guardá-lo.",
+                        Text("Backup completo", style = MaterialTheme.typography.titleMedium)
+                        Text("Guarda exploração real, percentuais, viagens, expedições, roteiros e preferências. Restaurar mostra uma prévia e mescla sem apagar os dados atuais. Mapas offline e simulação ficam fora do arquivo.",
                             color = Muted, style = MaterialTheme.typography.bodySmall)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = onExport, enabled = !state.active && !storageBusy, modifier = Modifier.weight(1f)) { Text("Exportar") }
@@ -637,6 +583,7 @@ fun ExplorationScreen(
                     Text("Expo World  ${BuildConfig.VERSION_NAME}", color = Muted.copy(alpha = .7f), style = MaterialTheme.typography.labelSmall)
                 }
             }
+            PrimaryNavigation(if(menuSection==1)1 else if(menuSection==2)3 else -1,navigate)
         }
     }
     if (summaryOpen && trace != null) AlertDialog(
@@ -644,7 +591,8 @@ fun ExplorationScreen(
         title = { Text(if (trace.completed) "Seu percurso" else "Percurso recuperado") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(if (simulatedView) "MODO SIMULADO" else "Descobertas salvas neste aparelho", color = Mint)
+                Text(if (simulatedView) "MODO SIMULADO" else "Viagem guardada automaticamente no histórico", color = Mint)
+                TripInsightsPanel(app,trace,cityProgress)
                 Text("Área nova: ${trace.newAreaSquareMeters?.let { areaLabel(it) } ?: "indisponível neste percurso antigo"}", fontWeight = FontWeight.Bold)
                 summary?.let { data ->
                     Text("Distância: ${distanceLabel(data.distanceMeters)}")
@@ -655,6 +603,8 @@ fun ExplorationScreen(
                     if (data.partial) Text("Rastro parcial: somente as amostras mais recentes. A área nova considera toda a viagem.")
                 } ?: Text("Calculando resumo…")
                 if (!trace.completed) Text("Trecho recuperado após interrupção; últimas leituras em memória podem estar ausentes.")
+                if(canSave) Button(onClick={routeTitle=java.text.SimpleDateFormat("dd/MM • HH:mm",Locale.forLanguageTag("pt-BR")).format(java.util.Date(trace.startedAtMillis));titleDialog=true;summaryOpen=false},modifier=Modifier.fillMaxWidth()){Text("Dar um nome ao trajeto")}
+                if(!simulatedView) OutlinedButton(onClick={summaryOpen=false;cardOpen=true},enabled=!storageBusy,modifier=Modifier.fillMaxWidth()){Text("Compartilhar descobertas")}
                 Text("Estimativas de GPS. As áreas novas podem ser destacadas em dourado no mapa.", color = Muted)
             }
         },
@@ -670,16 +620,37 @@ fun ExplorationScreen(
                 else Canvas(Modifier.fillMaxWidth().aspectRatio(ExpeditionArt.WIDTH.toFloat() / ExpeditionArt.HEIGHT)) {
                     ExpeditionRenderer.draw(drawContext.canvas.nativeCanvas, art, size.width, size.height, map = cardMap?.bitmap)
                 }
-                Text("GIF em 720 × 960, com 100 quadros, cores adaptadas ao mapa e animação mais suave. PNG e GIF incluem o mapa e o percurso, com as cores do seu tema. Internet é necessária para carregar o mapa. Os arquivos são salvos onde você escolher.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                Text("Escolha imagem, animação ou vídeo. A prévia mostra a evolução do trajeto; o vídeo inclui seu marcador e, quando disponível, as novas descobertas. O mapa precisa estar carregado.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onCardExport, enabled = !storageBusy && cardMap != null, modifier = Modifier.weight(1f)) { Text("Salvar PNG") }
-                    OutlinedButton(onClick = onAnimationExport, enabled = !storageBusy && cardMap != null, modifier = Modifier.weight(1f)) { Text("Salvar GIF") }
+                    Button(onClick = onCardExport, enabled = !storageBusy && cardMap != null, modifier = Modifier.weight(1f)) { Text("Imagem") }
+                    OutlinedButton(onClick = onAnimationExport, enabled = !storageBusy && cardMap != null, modifier = Modifier.weight(1f)) { Text("GIF") }
+                }
+                OutlinedButton(onClick={previewPlaying=!previewPlaying},modifier=Modifier.fillMaxWidth()){Text(if(previewPlaying)"Pausar prévia" else "Ver prévia animada")}
+                Button(onClick=onVideoExport,enabled=!storageBusy&&cardMap!=null,modifier=Modifier.fillMaxWidth()){Text("Salvar vídeo MP4")}
+                if(storageBusy){
+                    if(exportProgress>=0)LinearProgressIndicator(progress={exportProgress},modifier=Modifier.fillMaxWidth()) else LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text(if(exportProgress>=0)"Preparando arquivo • ${(exportProgress*100).toInt()}%" else "Preparando mapa e arquivo…")
+                    OutlinedButton(onClick=onCancelStorage){Text("Cancelar exportação")}
                 }
                 if (storageMessage.isNotEmpty()) Text(storageMessage, color = Mint)
                 TextButton(onClick = { cardOpen = false }, modifier = Modifier.fillMaxWidth()) { Text("Fechar") }
             }
         }
     }
+    if(expeditionSummaryOpen) AlertDialog(onDismissRequest={expeditionSummaryOpen=false},title={Text("Sua expedição")},
+        text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+            Text("${expeditionTraces.size} percursos no mesmo mapa")
+            val total by produceState<Pair<Double,Double>?>(null,expeditionTraces){value=withContext(Dispatchers.Default){val summaries=expeditionTraces.map{TripSummary.from(it)};summaries.sumOf{it.distanceMeters} to summaries.sumOf{it.recordedSeconds}}}
+            total?.let{Text("${distanceLabel(it.first)} • ${durationLabel(it.second)} de registros")}
+            Text("Soma dos percursos: ruas repetidas podem aparecer em várias viagens. O progresso de exploração continua contando cada trecho uma vez.")
+        }},confirmButton={TextButton(onClick={expeditionSummaryOpen=false}){Text("Ver mapa")}})
+    if(gpsDialog) AlertDialog(onDismissRequest={gpsDialog=false},title={Text("Localização do percurso")},
+        text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)){
+            Text(gpsSignal.label+(gpsSignal.accuracyMeters?.let{" • precisão estimada de ${it.toInt()} m"} ?: ""))
+            Text(status)
+            Text("A névoa e o reconhecimento de ruas usam limites de precisão diferentes. Em locais fechados ou entre prédios, aguarde um sinal melhor.",style=MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick={gpsDialog=false;onAppSettings()},modifier=Modifier.fillMaxWidth()){Text("Revisar permissões")}
+        }},confirmButton={TextButton(onClick={gpsDialog=false;onGpsSettings()}){Text("Ajustar GPS")}},dismissButton={TextButton(onClick={gpsDialog=false}){Text("Voltar ao mapa")}})
     if (confirmEnd && state.active) AlertDialog(
         onDismissRequest = { confirmEnd = false },
         title = { Text("Encerrar este percurso?") },
@@ -687,12 +658,12 @@ fun ExplorationScreen(
         confirmButton = { TextButton(enabled = !storageBusy, onClick = {
             confirmEnd = false; menuOpen = false; onTripToggle()
         }) { Text("Sim, encerrar") } },
-        dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text("Continuar percurso") } }
+        dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text(if(state.paused)"Manter pausado" else "Continuar percurso") } }
     )
 }
 
 @Composable
-private fun NeighborhoodPanel(progress: CityProgress, simulated: Boolean, hasPosition: Boolean, onFocus: (String) -> Unit) {
+private fun NeighborhoodPanel(progress: CityProgress, simulated: Boolean, hasPosition: Boolean, onFocus: (String) -> Unit, onPlan:(String)->Unit) {
     val uriHandler = LocalUriHandler.current
     var expanded by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -734,6 +705,7 @@ private fun NeighborhoodPanel(progress: CityProgress, simulated: Boolean, hasPos
                                     trackColor = Track, modifier = Modifier.fillMaxWidth())
                                 Text(if (row.totalMeters > 0) "${distanceLabel(row.visitedMeters)} / ${distanceLabel(row.totalMeters)} estimados • tocar para ver no mapa"
                                     else "Sem vias elegíveis nesta base", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                if(!simulated) TextButton(onClick={onPlan(row.id)}){Text("Explorar este bairro")}
                             }
                         }
                     }
@@ -785,7 +757,7 @@ private fun ThemePicker(onSelect: (ExplorerTheme) -> Unit) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 group.forEach { option ->
                     FilterChip(selected = selected == option, onClick = { onSelect(option) },
-                        label = { Text(option.label, fontSize = 11.sp) },
+                        label = { Text(option.label, fontSize = 12.sp) },
                         leadingIcon = { Box(Modifier.size(10.dp).background(themeColor(option.carHighlight), CircleShape)) })
                 }
             }

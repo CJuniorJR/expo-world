@@ -46,4 +46,15 @@ class PocketPlannerTest {
             assertTrue(runCatching { PocketPlanCodec.decode("{}") }.isFailure)
         } finally { db.close() }
     }
+    @Test fun destinationAndNeighborhoodFieldsRoundTripWhileLegacyPlansStillOpen() {
+        val path=fixture("pedestrian")
+        val legacy=PocketPlan("old",PocketRequest(path.points.first(),45,ActivityKind.WALK,PocketPurpose.EXPLORE),path,100.0)
+        val json=JSONObject(PocketPlanCodec.encode(legacy))
+        listOf("destination","detourMinutes","neighborhoodId","baselineSeconds","neighborhoodFresh","neighborhoodTotal").forEach { json.remove(it) }
+        assertEquals(legacy,PocketPlanCodec.decode(json.toString()))
+        val advanced=legacy.copy(request=legacy.request.copy(destination=path.points.last(),detourMinutes=15,neighborhoodId="bairro-test"),
+            baselineSeconds=700.0,neighborhoodFreshMeters=50.0,neighborhoodTotalMeters=10_000.0)
+        assertEquals(advanced,PocketPlanCodec.decode(PocketPlanCodec.encode(advanced)))
+    }
+
 }
